@@ -1,5 +1,38 @@
-import { Activity, CheckCircle2, CirclePlus, Clock3, FolderKanban, Loader2, Trash2 } from 'lucide-react';
+import {
+  Activity,
+  BarChart3,
+  Building2,
+  Camera,
+  CheckCircle2,
+  CirclePlus,
+  Clock3,
+  DatabaseZap,
+  DollarSign,
+  Eye,
+  EyeOff,
+  FolderKanban,
+  HardHat,
+  KeyRound,
+  LogIn,
+  LogOut,
+  Loader2,
+  Package,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+  UserRound,
+  UserCog,
+  UsersRound,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import ProjectAccessStep from './components/project-setup/ProjectAccessStep';
+import ProjectCostStep from './components/project-setup/ProjectCostStep';
+import ProjectDetailsStep from './components/project-setup/ProjectDetailsStep';
+import ProjectLandStep from './components/project-setup/ProjectLandStep';
+import ProjectLocationStep from './components/project-setup/ProjectLocationStep';
+import AdminPage from './pages/AdminPage';
+import UserPage from './pages/UserPage';
 
 const emptyForm = {
   title: '',
@@ -29,9 +62,175 @@ const statusIcons = {
   done: CheckCircle2
 };
 
-async function request(path, options) {
+const roles = {
+  admin: {
+    label: 'Admin',
+    description: 'Quản lý user, phân quyền và xử lý lỗi hệ thống',
+    icon: ShieldCheck,
+    permissions: {
+      create: false,
+      updateStatus: false,
+      delete: false
+    }
+  },
+  contractor: {
+    label: 'Thầu',
+    description: 'Quản lý công trình và công việc được giao',
+    icon: HardHat,
+    permissions: {
+      create: true,
+      updateStatus: true,
+      delete: false
+    }
+  }
+};
+
+const emptyAuthForm = {
+  username: '',
+  displayName: '',
+  password: '',
+  confirmPassword: ''
+};
+
+const emptyProjectSetupForm = {
+  name: '',
+  investorName: '',
+  investorPhone: '',
+  type: 'house',
+  upperFloors: '',
+  hasBasement: false,
+  startDate: '',
+  duration: '',
+  location: '',
+  fullAddress: '',
+  provinceCity: '',
+  wardCommune: '',
+  accessType: 'frontage',
+  alleyWidth: '',
+  truckAccess: 'yes',
+  landLength: '',
+  landWidth: '',
+  roughUnitPrice: '3.500.000'
+};
+
+const projectTypeLabels = {
+  house: 'Nhà phố',
+  apartment: 'Căn hộ cao tầng',
+  villa: 'Biệt thự',
+  office: 'Văn phòng',
+  factory: 'Nhà xưởng',
+  repair: 'Sửa chữa cải tạo',
+  shop: 'Cửa hàng',
+  restaurant: 'Nhà hàng',
+  hotel: 'Khách sạn',
+  warehouse: 'Kho bãi',
+  school: 'Trường học',
+  clinic: 'Phòng khám',
+  townhouse: 'Nhà liền kề',
+  interior: 'Thi công nội thất',
+  landscape: 'Sân vườn cảnh quan',
+  infrastructure: 'Hạ tầng',
+  other: 'Khác'
+};
+
+const navigationItems = [
+  {
+    id: 'overview',
+    label: 'Tổng quan',
+    icon: BarChart3,
+    roles: ['admin'],
+    title: 'Tổng quan',
+    description: 'Xem nhanh trạng thái hệ thống và các tác vụ cần chú ý.'
+  },
+  {
+    id: 'projects',
+    label: 'Dự án',
+    icon: Building2,
+    roles: ['contractor'],
+    title: 'Dự án',
+    description: 'Quản lý hồ sơ dự án phần thô, thông tin chủ đầu tư, địa điểm và quy mô công trình.'
+  },
+  {
+    id: 'users',
+    label: 'Người dùng',
+    icon: UserCog,
+    roles: ['admin'],
+    title: 'Quản lý người dùng',
+    description: 'Admin tạo, khóa, mở và chỉnh thông tin tài khoản trong hệ thống.'
+  },
+  {
+    id: 'roles',
+    label: 'Phân quyền',
+    icon: ShieldCheck,
+    roles: ['admin'],
+    title: 'Phân quyền',
+    description: 'Admin kiểm soát vai trò người dùng và quyền truy cập từng nhóm.'
+  },
+  {
+    id: 'data-fixes',
+    label: 'Sửa dữ liệu',
+    icon: DatabaseZap,
+    roles: ['admin'],
+    title: 'Sửa dữ liệu lỗi',
+    description: 'Admin hỗ trợ chỉnh dữ liệu nhập sai, dữ liệu trùng hoặc thông tin bị lệch.'
+  },
+  {
+    id: 'system-errors',
+    label: 'Lỗi hệ thống',
+    icon: Activity,
+    roles: ['admin'],
+    title: 'Lỗi hệ thống',
+    description: 'Admin xem lỗi đăng nhập, lỗi kết nối, lỗi dữ liệu và trạng thái API.'
+  },
+  {
+    id: 'workers',
+    label: 'Nhân công',
+    icon: UsersRound,
+    roles: ['contractor'],
+    title: 'Nhân công',
+    description: 'Quản lý đội thi công, phân công công việc, số công và chấm công.'
+  },
+  {
+    id: 'materials',
+    label: 'Vật tư',
+    icon: Package,
+    roles: ['contractor'],
+    title: 'Quản lý vật tư',
+    description: 'Theo dõi vật tư nhập, sử dụng và tồn kho theo từng công trình.'
+  },
+  {
+    id: 'costs',
+    label: 'Chi phí',
+    icon: DollarSign,
+    roles: ['contractor'],
+    title: 'Chi phí',
+    description: 'Theo dõi và tổng hợp chi phí thực tế theo từng công trình.'
+  },
+  {
+    id: 'diary',
+    label: 'Nhật ký công trình',
+    icon: Camera,
+    roles: ['contractor'],
+    title: 'Nhật ký công trình',
+    description: 'Ghi nhận diễn biến thi công, nhân công và hình ảnh hiện trường theo từng ngày.'
+  },
+  {
+    id: 'settings',
+    label: 'Cài đặt',
+    icon: Settings,
+    roles: ['admin'],
+    title: 'Cài đặt hệ thống',
+    description: 'Admin cấu hình hệ thống, kết nối triển khai và thông tin hỗ trợ.'
+  }
+];
+
+async function request(path, options = {}, token = '') {
   const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers
+    },
     ...options
   });
 
@@ -44,13 +243,192 @@ async function request(path, options) {
   return data;
 }
 
+function isStrongPassword(password) {
+  return /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
+}
+
+function formatCurrencyInput(value) {
+  const digits = String(value).replace(/\D/g, '');
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function parseCurrencyInput(value) {
+  return Number(String(value).replace(/\D/g, ''));
+}
+
+function isValidVietnamDate(value) {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
+  if (!match) return false;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function formatVietnamDate(date) {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${date.getFullYear()}`;
+}
+
+function parseLocationFromText(query, current = {}) {
+  const cleanQuery = query.replace(/\s+/g, ' ').trim();
+  const wardMatch = cleanQuery.match(/(?:phường|xã|thị trấn|p\.|x\.)\s*[^,]+/i);
+  const provinceMatch = cleanQuery.match(/(?:tp\.?|thành phố|tỉnh)\s*[^,]+/i);
+  const hasHoChiMinh = /hồ chí minh|ho chi minh|hcm|sài gòn|sai gon/i.test(cleanQuery);
+
+  return {
+    fullAddress: cleanQuery,
+    provinceCity: provinceMatch?.[0] || (hasHoChiMinh ? 'TP. Hồ Chí Minh' : current.provinceCity || 'TP. Hồ Chí Minh'),
+    wardCommune: wardMatch?.[0] || current.wardCommune || ''
+  };
+}
+
+async function resolveLocationFields(query, current = {}) {
+  const fallback = parseLocationFromText(query, current);
+
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&accept-language=vi&q=${encodeURIComponent(
+        `${query}, Việt Nam`
+      )}`
+    );
+    const [result] = await response.json();
+    const address = result?.address || {};
+
+    return {
+      fullAddress: result?.display_name || fallback.fullAddress,
+      provinceCity: address.city || address.state || address.province || fallback.provinceCity,
+      wardCommune:
+        address.suburb ||
+        address.quarter ||
+        address.neighbourhood ||
+        address.village ||
+        address.town ||
+        address.municipality ||
+        fallback.wardCommune
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function getCalendarDays(monthDate) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7;
+  const startDate = new Date(year, month, 1 - startOffset);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(startDate);
+    date.setDate(startDate.getDate() + index);
+    return date;
+  });
+}
+
+const monthNames = [
+  'Tháng 1',
+  'Tháng 2',
+  'Tháng 3',
+  'Tháng 4',
+  'Tháng 5',
+  'Tháng 6',
+  'Tháng 7',
+  'Tháng 8',
+  'Tháng 9',
+  'Tháng 10',
+  'Tháng 11',
+  'Tháng 12'
+];
+
+function getProjectSetupStorageKey(userId) {
+  return `tnideal_project_setup_${userId}`;
+}
+
+function readSavedProjectSetup(userId) {
+  if (!userId) return null;
+
+  try {
+    return JSON.parse(localStorage.getItem(getProjectSetupStorageKey(userId))) || null;
+  } catch {
+    localStorage.removeItem(getProjectSetupStorageKey(userId));
+    return null;
+  }
+}
+
 function App() {
   const [projects, setProjects] = useState([]);
   const [form, setForm] = useState(emptyForm);
+  const [session, setSession] = useState(() => {
+    const savedSession = localStorage.getItem('tnideal_session');
+    if (!savedSession) return null;
+
+    try {
+      const parsedSession = JSON.parse(savedSession);
+      if (roles[parsedSession?.user?.role]) return parsedSession;
+      localStorage.removeItem('tnideal_session');
+      return null;
+    } catch {
+      localStorage.removeItem('tnideal_session');
+      return null;
+    }
+  });
+  const [authMode, setAuthMode] = useState('login');
+  const [authForm, setAuthForm] = useState(emptyAuthForm);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
+  const [authErrors, setAuthErrors] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
+  const [activePage, setActivePage] = useState(() =>
+    session?.user?.role === 'contractor' && readSavedProjectSetup(session.user.id) ? 'projects' : 'overview'
+  );
+  const [showProjectSetup, setShowProjectSetup] = useState(false);
+  const [completedProjectSetup, setCompletedProjectSetup] = useState(() =>
+    readSavedProjectSetup(session?.user?.id)
+  );
+  const [projectSetupStep, setProjectSetupStep] = useState('details');
+  const [projectSetupForm, setProjectSetupForm] = useState(emptyProjectSetupForm);
+  const [projectSetupError, setProjectSetupError] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [mapQuery, setMapQuery] = useState('Việt Nam');
+  const [mapPinPosition, setMapPinPosition] = useState({ x: 50, y: 50 });
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const currentRole = roles[session?.user.role || 'contractor'];
+  const permissions = currentRole.permissions;
+  const visibleNavigation = session ? navigationItems.filter((item) => item.roles.includes(session.user.role)) : [];
+  const activeNavigation = visibleNavigation.find((item) => item.id === activePage) || visibleNavigation[0];
+  const ActivePageIcon = activeNavigation?.icon || BarChart3;
+  const activeNavigationId = activeNavigation?.id || 'overview';
+  const isCheckingFirstProject = session?.user.role === 'contractor' && activeNavigationId === 'projects' && loading;
+  const shouldShowFirstProjectPrompt =
+    session?.user.role === 'contractor' && activeNavigationId === 'projects' && !loading && !completedProjectSetup;
+  const calendarDays = getCalendarDays(calendarMonth);
+  const selectedStartDate = projectSetupForm.startDate;
+  const cleanMapUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=15&output=embed`;
+  const landLength = Number(projectSetupForm.landLength);
+  const landWidth = Number(projectSetupForm.landWidth);
+  const landScale =
+    landLength && landWidth ? Math.min(260 / landWidth, 230 / landLength) : Math.min(260 / 12, 230 / 20);
+  const landPreviewWidth = landWidth ? Math.max(58, landWidth * landScale) : 138;
+  const landPreviewHeight = landLength ? Math.max(90, landLength * landScale) : 230;
+  const landArea = landLength && landWidth ? landLength * landWidth : 0;
+  const roughUnitPrice = parseCurrencyInput(projectSetupForm.roughUnitPrice);
+  const projectUpperFloors = Number(projectSetupForm.upperFloors || 0);
+  const projectTotalFloors = 1 + projectUpperFloors + (projectSetupForm.hasBasement ? 1 : 0);
+  const estimatedFloorArea = landArea * projectTotalFloors;
+  const estimatedRoughCost = estimatedFloorArea * roughUnitPrice;
 
   const stats = useMemo(() => {
     return projects.reduce(
@@ -64,26 +442,156 @@ function App() {
   }, [projects]);
 
   const loadProjects = useCallback(async () => {
+    if (!session?.token) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
     try {
       const query = statusFilter === 'all' ? '' : `?status=${statusFilter}`;
-      const data = await request(`/api/projects${query}`);
+      const data = await request(`/api/projects${query}`, {}, session.token);
       setProjects(data);
     } catch (error) {
       setMessage(error.message);
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [session?.token, statusFilter]);
 
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
 
+  useEffect(() => {
+    const savedSetup = readSavedProjectSetup(session?.user?.id);
+    setCompletedProjectSetup(savedSetup);
+
+    if (session?.user?.role === 'contractor' && savedSetup) {
+      if (savedSetup.jobDraft) {
+        setForm(savedSetup.jobDraft);
+      } else {
+        setForm((current) => ({
+          ...current,
+          title: savedSetup.name || current.title,
+          category: projectTypeLabels[savedSetup.type] || current.category
+        }));
+      }
+      setActivePage('projects');
+    }
+  }, [session?.user?.id, session?.user?.role]);
+
+  useEffect(() => {
+    if (session && activeNavigationId !== activePage) {
+      setActivePage(activeNavigationId);
+    }
+  }, [activeNavigationId, activePage, session]);
+
+  useEffect(() => {
+    if (!authMessage) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setAuthMessage('');
+    }, 4200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [authMessage]);
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    const nextErrors = {};
+    setAuthLoading(true);
+    setAuthMessage('');
+    setAuthErrors({});
+
+    if (authForm.username.trim().length < 3) {
+      nextErrors.username = true;
+      setAuthLoading(false);
+      setAuthMessage('Tên đăng nhập phải có ít nhất 3 ký tự.');
+      setAuthErrors(nextErrors);
+      return;
+    }
+
+    if (!authForm.password) {
+      nextErrors.password = true;
+      setAuthLoading(false);
+      setAuthMessage('Vui lòng nhập mật khẩu.');
+      setAuthErrors(nextErrors);
+      return;
+    }
+
+    if (authMode === 'register') {
+      if (authForm.displayName.trim().length < 2) {
+        nextErrors.displayName = true;
+        setAuthLoading(false);
+        setAuthMessage('Tên người dùng phải có ít nhất 2 ký tự.');
+        setAuthErrors(nextErrors);
+        return;
+      }
+
+      if (authForm.password.length < 8 || !isStrongPassword(authForm.password)) {
+        nextErrors.password = true;
+        setAuthLoading(false);
+        setAuthMessage('Mật khẩu phải có ít nhất 8 ký tự, 1 chữ hoa, 1 số và 1 ký tự đặc biệt.');
+        setAuthErrors(nextErrors);
+        return;
+      }
+
+      if (authForm.password !== authForm.confirmPassword) {
+        nextErrors.password = true;
+        nextErrors.confirmPassword = true;
+        setAuthLoading(false);
+        setAuthMessage('Mật khẩu nhập lại không khớp.');
+        setAuthErrors(nextErrors);
+        return;
+      }
+    }
+
+    try {
+      const data = await request(`/api/auth/${authMode}`, {
+        method: 'POST',
+        body: JSON.stringify(authForm)
+      });
+
+      localStorage.setItem('tnideal_session', JSON.stringify(data));
+      setSession(data);
+      setAuthForm(emptyAuthForm);
+      setAuthErrors({});
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setMessage('');
+    } catch (error) {
+      setAuthMessage(error.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem('tnideal_session');
+    setSession(null);
+    setProjects([]);
+    setAuthMode('login');
+    setAuthForm(emptyAuthForm);
+    setAuthErrors({});
+    setShowPassword(false);
+    setShowConfirmPassword(false);
+    setAuthMessage('');
+    setActivePage('overview');
+    setMessage('');
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (!permissions.create) {
+      setMessage('Bạn không có quyền tạo công việc mới.');
+      return;
+    }
+
     setSaving(true);
     setMessage('');
 
@@ -91,10 +599,10 @@ function App() {
       await request('/api/projects', {
         method: 'POST',
         body: JSON.stringify(form)
-      });
+      }, session.token);
       setForm(emptyForm);
       await loadProjects();
-      setMessage('Đã thêm ý tưởng mới.');
+      setMessage('Đã thêm công việc mới.');
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -103,11 +611,16 @@ function App() {
   }
 
   async function updateStatus(project, status) {
+    if (!permissions.updateStatus) {
+      setMessage(`${currentRole.label} không thể cập nhật trạng thái.`);
+      return;
+    }
+
     try {
       await request(`/api/projects/${project._id}`, {
         method: 'PATCH',
         body: JSON.stringify({ status })
-      });
+      }, session.token);
       await loadProjects();
     } catch (error) {
       setMessage(error.message);
@@ -115,10 +628,15 @@ function App() {
   }
 
   async function deleteProject(projectId) {
+    if (!permissions.delete) {
+      setMessage(`${currentRole.label} không thể xóa công trình.`);
+      return;
+    }
+
     try {
-      await request(`/api/projects/${projectId}`, { method: 'DELETE' });
+      await request(`/api/projects/${projectId}`, { method: 'DELETE' }, session.token);
       await loadProjects();
-      setMessage('Đã xóa dự án.');
+      setMessage('Đã xóa công việc.');
     } catch (error) {
       setMessage(error.message);
     }
@@ -128,183 +646,596 @@ function App() {
     setStatusFilter(nextFilter);
   }
 
-  return (
-    <main className="app-shell">
-      <section className="hero-band">
-        <div className="hero-copy">
-          <span className="eyebrow">React + Node.js + MongoDB Atlas</span>
-          <h1>TN Ideal</h1>
-          <p>Không gian quản lý ý tưởng đồ án, theo dõi tiến độ và lưu dữ liệu trực tiếp lên MongoDB Atlas.</p>
-        </div>
-        <div className="hero-panel" aria-label="Tổng quan dự án">
-          <div>
-            <span>Tổng ý tưởng</span>
-            <strong>{stats.total}</strong>
-          </div>
-          <div>
-            <span>Đang làm</span>
-            <strong>{stats.active}</strong>
-          </div>
-          <div>
-            <span>Hoàn thành</span>
-            <strong>{stats.done}</strong>
-          </div>
-        </div>
-      </section>
+  function handleProjectSetupSubmit(event) {
+    event.preventDefault();
+    const duration = Number(projectSetupForm.duration);
+    const upperFloors = Number(projectSetupForm.upperFloors || 0);
 
-      <section className="workspace">
-        <form className="project-form" onSubmit={handleSubmit}>
-          <div className="section-title">
-            <FolderKanban size={22} />
-            <h2>Thêm ý tưởng</h2>
-          </div>
+    if (projectSetupForm.name.trim().length < 3) {
+      setProjectSetupError('Tên dự án phải có ít nhất 3 ký tự.');
+      return;
+    }
 
-          <label>
-            Tên dự án
-            <input
-              value={form.title}
-              onChange={(event) => setForm({ ...form, title: event.target.value })}
-              placeholder="Ví dụ: Website đặt lịch khám"
-              required
-              minLength={3}
-            />
-          </label>
+    if (projectSetupForm.investorName.trim().length < 2) {
+      setProjectSetupError('Tên chủ đầu tư phải có ít nhất 2 ký tự.');
+      return;
+    }
 
-          <div className="field-grid">
-            <label>
-              Người phụ trách
-              <input
-                value={form.owner}
-                onChange={(event) => setForm({ ...form, owner: event.target.value })}
-                placeholder="Tên thành viên"
-                required
-              />
-            </label>
-            <label>
-              Nhóm chức năng
-              <input
-                value={form.category}
-                onChange={(event) => setForm({ ...form, category: event.target.value })}
-                placeholder="Frontend, API, UI..."
-                required
-              />
-            </label>
-          </div>
+    if (!/^(0|\+84)[0-9]{8,10}$/.test(projectSetupForm.investorPhone.replace(/[^\d+]/g, ''))) {
+      setProjectSetupError('Số điện thoại chủ đầu tư chưa đúng định dạng.');
+      return;
+    }
 
-          <div className="field-grid">
-            <label>
-              Độ ưu tiên
-              <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}>
-                <option value="low">Thấp</option>
-                <option value="medium">Vừa</option>
-                <option value="high">Cao</option>
-              </select>
-            </label>
-            <label>
-              Trạng thái
-              <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value })}>
-                <option value="planning">Lên kế hoạch</option>
-                <option value="active">Đang làm</option>
-                <option value="done">Hoàn thành</option>
-              </select>
-            </label>
-          </div>
+    if (upperFloors < 0) {
+      setProjectSetupError('Số lầu không được âm.');
+      return;
+    }
 
-          <label>
-            Mô tả
-            <textarea
-              value={form.description}
-              onChange={(event) => setForm({ ...form, description: event.target.value })}
-              placeholder="Ghi chú mục tiêu, công nghệ hoặc tính năng chính"
-              rows="4"
-            />
-          </label>
+    if (!isValidVietnamDate(projectSetupForm.startDate)) {
+      setProjectSetupError('Ngày khởi công phải đúng định dạng dd/mm/yyyy.');
+      return;
+    }
 
-          <button className="primary-button" type="submit" disabled={saving}>
-            {saving ? <Loader2 className="spin" size={18} /> : <CirclePlus size={18} />}
-            {saving ? 'Đang lưu' : 'Thêm dự án'}
-          </button>
+    if (!duration || duration < 1) {
+      setProjectSetupError('Thời gian thi công phải lớn hơn 0.');
+      return;
+    }
 
-          {message && <p className="message">{message}</p>}
-        </form>
+    setProjectSetupError('');
+    setProjectSetupStep('location');
+  }
 
-        <section className="project-list">
-          <div className="list-header">
-            <div>
-              <span className="eyebrow">Dashboard</span>
-              <h2>Danh sách ý tưởng</h2>
-            </div>
-            <div className="segmented-control" aria-label="Lọc trạng thái">
-              {Object.entries(statusLabels).map(([value, label]) => (
-                <button
-                  className={statusFilter === value ? 'active' : ''}
-                  key={value}
-                  type="button"
-                  onClick={() => handleFilterChange(value)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+  function handleProjectLocationSubmit(event) {
+    event.preventDefault();
 
-          {loading ? (
-            <div className="empty-state">
-              <Loader2 className="spin" />
-              <span>Đang tải dữ liệu</span>
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="empty-state">
-              <FolderKanban />
-              <span>Chưa có ý tưởng nào trong bộ lọc này.</span>
-            </div>
-          ) : (
-            <div className="cards-grid">
-              {projects.map((project) => {
-                const StatusIcon = statusIcons[project.status];
+    if (projectSetupForm.location.trim().length < 5) {
+      setProjectSetupError('Vui lòng nhập hoặc chọn địa điểm công trình.');
+      return;
+    }
 
-                return (
-                  <article className="project-card" key={project._id}>
-                    <div className="card-topline">
-                      <span className={`status-pill ${project.status}`}>
-                        <StatusIcon size={15} />
-                        {statusLabels[project.status]}
-                      </span>
-                      <span className={`priority ${project.priority}`}>{priorityLabels[project.priority]}</span>
-                    </div>
+    if (projectSetupForm.fullAddress.trim().length < 5) {
+      setProjectSetupError('Vui lòng nhập địa chỉ đầy đủ của công trình.');
+      return;
+    }
 
-                    <h3>{project.title}</h3>
-                    <p>{project.description || 'Chưa có mô tả chi tiết.'}</p>
+    if (projectSetupForm.provinceCity.trim().length < 2) {
+      setProjectSetupError('Vui lòng nhập tỉnh hoặc thành phố.');
+      return;
+    }
 
-                    <dl>
-                      <div>
-                        <dt>Phụ trách</dt>
-                        <dd>{project.owner}</dd>
-                      </div>
-                      <div>
-                        <dt>Nhóm</dt>
-                        <dd>{project.category}</dd>
-                      </div>
-                    </dl>
+    if (projectSetupForm.wardCommune.trim().length < 2) {
+      setProjectSetupError('Vui lòng nhập phường hoặc xã.');
+      return;
+    }
 
-                    <div className="card-actions">
-                      <select value={project.status} onChange={(event) => updateStatus(project, event.target.value)}>
-                        <option value="planning">Lên kế hoạch</option>
-                        <option value="active">Đang làm</option>
-                        <option value="done">Hoàn thành</option>
-                      </select>
-                      <button type="button" onClick={() => deleteProject(project._id)} aria-label={`Xóa ${project.title}`}>
-                        <Trash2 size={17} />
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+    setProjectSetupError('');
+    setProjectSetupStep('access');
+  }
+
+  function handleProjectAccessSubmit(event) {
+    event.preventDefault();
+
+    if (
+      projectSetupForm.accessType === 'alley' &&
+      (!Number(projectSetupForm.alleyWidth) || Number(projectSetupForm.alleyWidth) <= 0)
+    ) {
+      setProjectSetupError('Vui lòng nhập chiều rộng hẻm.');
+      return;
+    }
+
+    setProjectSetupError('');
+    setProjectSetupStep('land');
+  }
+
+  function handleProjectLandSubmit(event) {
+    event.preventDefault();
+    const length = Number(projectSetupForm.landLength);
+    const width = Number(projectSetupForm.landWidth);
+
+    if (!length || length < 1) {
+      setProjectSetupError('Chiều dài miếng đất phải lớn hơn 0.');
+      return;
+    }
+
+    if (!width || width < 1) {
+      setProjectSetupError('Chiều rộng miếng đất phải lớn hơn 0.');
+      return;
+    }
+
+    setProjectSetupError('');
+    setProjectSetupStep('cost');
+  }
+
+  function handleProjectCostSubmit(event) {
+    event.preventDefault();
+    const duration = Number(projectSetupForm.duration);
+    const upperFloors = Number(projectSetupForm.upperFloors || 0);
+    const totalFloors = 1 + upperFloors + (projectSetupForm.hasBasement ? 1 : 0);
+    const length = Number(projectSetupForm.landLength);
+    const width = Number(projectSetupForm.landWidth);
+    const unitPrice = parseCurrencyInput(projectSetupForm.roughUnitPrice);
+    const floorArea = length * width * totalFloors;
+    const roughCost = floorArea * unitPrice;
+
+    if (!unitPrice || unitPrice < 1) {
+      setProjectSetupError('Vui lòng nhập đơn giá phần thô hợp lệ.');
+      return;
+    }
+
+    const preparedJob = {
+      ...emptyForm,
+      title: projectSetupForm.name.trim(),
+      category: projectTypeLabels[projectSetupForm.type],
+      description: [
+        `Loại dự án: ${projectTypeLabels[projectSetupForm.type]}`,
+        `Chủ đầu tư: ${projectSetupForm.investorName.trim()}`,
+        `SĐT: ${projectSetupForm.investorPhone.trim()}`,
+        `Gói thầu: Thi công phần thô`,
+        `Địa điểm: ${projectSetupForm.location.trim()}`,
+        `Địa chỉ đầy đủ: ${projectSetupForm.fullAddress.trim()}`,
+        `Tỉnh/thành: ${projectSetupForm.provinceCity.trim()}`,
+        `Phường/xã: ${projectSetupForm.wardCommune.trim()}`,
+        `Đường vào: ${
+          projectSetupForm.accessType === 'frontage'
+            ? 'Mặt tiền đường'
+            : `Hẻm rộng ${projectSetupForm.alleyWidth}m`
+        }, ${projectSetupForm.truckAccess === 'yes' ? 'xe tải vào được' : 'xe tải không vào được'}`,
+        `Vị trí ghim bản đồ: ${Math.round(mapPinPosition.x)}%, ${Math.round(mapPinPosition.y)}%`,
+        `Kích thước đất: ${length}m x ${width}m`,
+        `Diện tích đất: ${(length * width).toLocaleString('vi-VN')} m2`,
+        `Cấu trúc tầng: Trệt, ${upperFloors} lầu, ${
+          projectSetupForm.hasBasement ? 'có tầng hầm' : 'không tầng hầm'
+        } (${totalFloors} phần tầng)`,
+        `Ngày khởi công dự kiến: ${projectSetupForm.startDate}`,
+        `Thời gian thi công: ${duration} tháng`,
+        `Diện tích sàn tạm tính: ${floorArea.toLocaleString('vi-VN')} m2`,
+        `Đơn giá phần thô: ${unitPrice.toLocaleString('vi-VN')} VND/m2`,
+        `Chi phí phần thô tạm tính: ${roughCost.toLocaleString('vi-VN')} VND`
+      ].join('. ')
+    };
+    const savedSetup = {
+      ...projectSetupForm,
+      jobDraft: preparedJob,
+      completedAt: new Date().toISOString()
+    };
+
+    localStorage.setItem(getProjectSetupStorageKey(session.user.id), JSON.stringify(savedSetup));
+    setCompletedProjectSetup(savedSetup);
+    setForm(preparedJob);
+    setStatusFilter('all');
+    setMessage('Đã tạo dự án thành công.');
+    setProjectSetupError('');
+    setShowProjectSetup(false);
+    setProjectSetupStep('details');
+    setActivePage('projects');
+  }
+
+  async function searchProjectLocation() {
+    const query = projectSetupForm.location.trim();
+
+    if (query.length < 3) {
+      setProjectSetupError('Vui lòng nhập ít nhất 3 ký tự để tìm địa điểm.');
+      return;
+    }
+
+    const locationFields = await resolveLocationFields(query, projectSetupForm);
+
+    setProjectSetupError('');
+    setProjectSetupForm({
+      ...projectSetupForm,
+      ...locationFields
+    });
+    setMapQuery(query);
+  }
+
+  function moveMapPin(event) {
+    const mapBox = event.currentTarget.parentElement;
+    if (!mapBox) {
+      return;
+    }
+
+    const rect = mapBox.getBoundingClientRect();
+    const x = Math.min(95, Math.max(5, ((event.clientX - rect.left) / rect.width) * 100));
+    const y = Math.min(95, Math.max(5, ((event.clientY - rect.top) / rect.height) * 100));
+    setMapPinPosition({ x, y });
+  }
+
+  function handleMapPinPointerDown(event) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    moveMapPin(event);
+  }
+
+  async function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setProjectSetupError('Trình duyệt hiện không hỗ trợ lấy vị trí hiện tại.');
+      return;
+    }
+
+    setProjectSetupError('');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+        setProjectSetupForm((current) => ({
+          ...current,
+          location: coords,
+          fullAddress: current.fullAddress || coords
+        }));
+        setMapQuery(coords);
+        setMapPinPosition({ x: 50, y: 50 });
+      },
+      () => {
+        setProjectSetupError('Không lấy được vị trí hiện tại. Vui lòng cho phép quyền vị trí trong trình duyệt.');
+      }
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="auth-shell">
+        <div className="toast-stack" aria-live="polite">
+          {authMode === 'register' && (
+            <p className="toast warning">Mật khẩu cần có ít nhất 8 ký tự, 1 chữ hoa, 1 số và 1 ký tự đặc biệt.</p>
           )}
+          {authMessage && <p className="toast success">{authMessage}</p>}
+        </div>
+        <section className="auth-card">
+          <div className="auth-visual" aria-hidden="true">
+            <div className="brand-mark">
+              <Building2 size={22} />
+            </div>
+            <div>
+              <span className="auth-kicker">TN Ideal</span>
+              <h2>Trung tâm quản lý công trình</h2>
+              <p>Theo dõi công việc, quản lý đội thợ và nắm tiến độ thi công trong một nơi.</p>
+            </div>
+          </div>
+
+          <div className="auth-panel">
+            <div className="auth-copy">
+              <span className="eyebrow">Đăng nhập hệ thống</span>
+              <h1>{authMode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}</h1>
+            </div>
+
+            <form className="auth-form" noValidate onSubmit={handleAuthSubmit}>
+              <label>
+                Tên đăng nhập
+                <span className={`input-shell ${authErrors.username ? 'error' : ''}`}>
+                  <UserRound size={18} />
+                  <input
+                    autoComplete="username"
+                    minLength={3}
+                    required
+                    value={authForm.username}
+                    onChange={(event) => {
+                      setAuthForm({ ...authForm, username: event.target.value });
+                      setAuthErrors({ ...authErrors, username: false });
+                    }}
+                    placeholder="Nhập tên đăng nhập"
+                  />
+                </span>
+              </label>
+              {authMode === 'register' && (
+                <label>
+                  Tên người dùng
+                  <span className={`input-shell ${authErrors.displayName ? 'error' : ''}`}>
+                    <UserRound size={18} />
+                    <input
+                      autoComplete="name"
+                      minLength={2}
+                      required
+                      value={authForm.displayName}
+                      onChange={(event) => {
+                        setAuthForm({ ...authForm, displayName: event.target.value });
+                        setAuthErrors({ ...authErrors, displayName: false });
+                      }}
+                      placeholder="Nhập tên người dùng"
+                    />
+                  </span>
+                </label>
+              )}
+              <label>
+                Mật khẩu
+                <span className={`input-shell ${authErrors.password ? 'error' : ''}`}>
+                  <KeyRound size={18} />
+                  <input
+                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                    minLength={authMode === 'register' ? 8 : undefined}
+                    required
+                    type={showPassword ? 'text' : 'password'}
+                    value={authForm.password}
+                    onChange={(event) => {
+                      setAuthForm({ ...authForm, password: event.target.value });
+                      setAuthErrors({ ...authErrors, password: false });
+                    }}
+                    placeholder={authMode === 'login' ? 'Nhập mật khẩu' : 'Ví dụ: Matkhau@123'}
+                  />
+                  <button
+                    aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                    className="password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </span>
+              </label>
+              {authMode === 'register' && (
+                <label>
+                  Nhập lại mật khẩu
+                  <span className={`input-shell ${authErrors.confirmPassword ? 'error' : ''}`}>
+                    <KeyRound size={18} />
+                    <input
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={authForm.confirmPassword}
+                      onChange={(event) => {
+                        setAuthForm({ ...authForm, confirmPassword: event.target.value });
+                        setAuthErrors({ ...authErrors, confirmPassword: false });
+                      }}
+                      placeholder="Nhập lại mật khẩu"
+                    />
+                    <button
+                      aria-label={showConfirmPassword ? 'Ẩn mật khẩu nhập lại' : 'Hiện mật khẩu nhập lại'}
+                      className="password-toggle"
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </span>
+                </label>
+              )}
+              <button className="primary-button auth-submit" disabled={authLoading} type="submit">
+                {authLoading ? (
+                  <Loader2 className="spin" size={18} />
+                ) : authMode === 'login' ? (
+                  <LogIn size={18} />
+                ) : (
+                  <UserPlus size={18} />
+                )}
+                {authMode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
+              </button>
+
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setAuthMessage('');
+                }}
+              >
+                {authMode === 'login' ? 'Tạo tài khoản' : 'Quay lại đăng nhập'}
+              </button>
+            </form>
+          </div>
         </section>
-      </section>
-    </main>
+      </main>
+    );
+  }
+
+  if (shouldShowFirstProjectPrompt) {
+    return (
+      <main className="first-project-shell">
+        <button className="first-project-logout" type="button" onClick={logout}>
+          <LogOut size={18} />
+          Đăng xuất
+        </button>
+
+        <section className="first-project-panel popup">
+          <div className="first-project-icon">
+            <Building2 size={30} />
+          </div>
+          <h2>Chưa có dự án nào</h2>
+          <p>Tạo công trình phần thô đầu tiên để quản lý móng, kết cấu, vật tư và tiến độ thi công.</p>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => {
+              setProjectSetupForm(emptyProjectSetupForm);
+              setProjectSetupError('');
+              setProjectSetupStep('details');
+              setShowProjectSetup(true);
+            }}
+          >
+            <CirclePlus size={18} />
+            Tạo công trình phần thô
+          </button>
+        </section>
+
+        {showProjectSetup && (
+          <section className="project-setup-modal" aria-label="Tạo công trình phần thô">
+            <form
+              className={`project-setup-card ${projectSetupStep === 'location' ? 'location-card' : ''}`}
+              onSubmit={
+                projectSetupStep === 'details'
+                  ? handleProjectSetupSubmit
+                  : projectSetupStep === 'location'
+                    ? handleProjectLocationSubmit
+                    : projectSetupStep === 'access'
+                      ? handleProjectAccessSubmit
+                      : projectSetupStep === 'land'
+                        ? handleProjectLandSubmit
+                        : handleProjectCostSubmit
+              }
+            >
+              <div>
+                <span className="eyebrow">
+                  {projectSetupStep === 'details'
+                    ? 'Công trình phần thô'
+                    : projectSetupStep === 'location'
+                      ? 'Địa điểm công trình'
+                      : projectSetupStep === 'access'
+                        ? 'Đường vào công trình'
+                        : projectSetupStep === 'land'
+                          ? 'Kích thước đất'
+                          : 'Tính chi phí'}
+                </span>
+                <h2>
+                  {projectSetupStep === 'details'
+                    ? 'Tạo công trình phần thô'
+                    : projectSetupStep === 'location'
+                      ? 'Dự án này ở đâu?'
+                      : projectSetupStep === 'access'
+                        ? 'Vật tư vào công trình thế nào?'
+                        : projectSetupStep === 'land'
+                          ? 'Miếng đất rộng bao nhiêu?'
+                          : 'Chi phí phần thô khoảng bao nhiêu?'}
+                </h2>
+              </div>
+
+              {projectSetupStep === 'details' && (
+                <ProjectDetailsStep
+                  form={projectSetupForm}
+                  setForm={setProjectSetupForm}
+                  clearError={() => setProjectSetupError('')}
+                  projectTypeLabels={projectTypeLabels}
+                  showDatePicker={showDatePicker}
+                  setShowDatePicker={setShowDatePicker}
+                  calendarMonth={calendarMonth}
+                  setCalendarMonth={setCalendarMonth}
+                  calendarDays={calendarDays}
+                  selectedStartDate={selectedStartDate}
+                  monthNames={monthNames}
+                  formatVietnamDate={formatVietnamDate}
+                />
+              )}
+
+              {projectSetupStep === 'location' && (
+                <ProjectLocationStep
+                  form={projectSetupForm}
+                  setForm={setProjectSetupForm}
+                  clearError={() => setProjectSetupError('')}
+                  cleanMapUrl={cleanMapUrl}
+                  mapPinPosition={mapPinPosition}
+                  searchProjectLocation={searchProjectLocation}
+                  useCurrentLocation={useCurrentLocation}
+                  handleMapPinPointerDown={handleMapPinPointerDown}
+                  moveMapPin={moveMapPin}
+                />
+              )}
+
+              {projectSetupStep === 'access' && (
+                <ProjectAccessStep
+                  form={projectSetupForm}
+                  setForm={setProjectSetupForm}
+                  clearError={() => setProjectSetupError('')}
+                />
+              )}
+
+              {projectSetupStep === 'land' && (
+                <ProjectLandStep
+                  form={projectSetupForm}
+                  setForm={setProjectSetupForm}
+                  clearError={() => setProjectSetupError('')}
+                  landLength={landLength}
+                  landWidth={landWidth}
+                  landPreviewWidth={landPreviewWidth}
+                  landPreviewHeight={landPreviewHeight}
+                  landArea={landArea}
+                />
+              )}
+
+              {projectSetupStep === 'cost' && (
+                <ProjectCostStep
+                  form={projectSetupForm}
+                  setForm={setProjectSetupForm}
+                  clearError={() => setProjectSetupError('')}
+                  landArea={landArea}
+                  totalFloors={projectTotalFloors}
+                  estimatedFloorArea={estimatedFloorArea}
+                  estimatedRoughCost={estimatedRoughCost}
+                  formatCurrencyInput={formatCurrencyInput}
+                />
+              )}
+
+              {projectSetupError && <p className="setup-error">{projectSetupError}</p>}
+              <div className="modal-actions">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => {
+                    if (projectSetupStep === 'location') {
+                      setProjectSetupStep('details');
+                      setProjectSetupError('');
+                      return;
+                    }
+
+                    if (projectSetupStep === 'access') {
+                      setProjectSetupStep('location');
+                      setProjectSetupError('');
+                      return;
+                    }
+
+                    if (projectSetupStep === 'land') {
+                      setProjectSetupStep('access');
+                      setProjectSetupError('');
+                      return;
+                    }
+
+                    if (projectSetupStep === 'cost') {
+                      setProjectSetupStep('land');
+                      setProjectSetupError('');
+                      return;
+                    }
+
+                    setShowProjectSetup(false);
+                  }}
+                >
+                  {projectSetupStep === 'details' ? 'Hủy' : 'Quay lại'}
+                </button>
+                <button className="primary-button" type="submit">
+                  {projectSetupStep === 'cost' ? 'Tạo dự án' : 'Tiếp tục'}
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </main>
+    );
+  }
+
+  if (isCheckingFirstProject) {
+    return (
+      <main className="first-project-shell">
+        <section className="first-project-panel popup checking">
+          <Loader2 className="spin" size={30} />
+          <h2>Đang kiểm tra dự án</h2>
+        </section>
+      </main>
+    );
+  }
+
+  const RolePage = session.user.role === 'admin' ? AdminPage : UserPage;
+
+  return (
+    <RolePage
+      activeNavigation={activeNavigation}
+      activeNavigationId={activeNavigationId}
+      currentRole={currentRole}
+      completedProjectSetup={completedProjectSetup}
+      deleteProject={deleteProject}
+      form={form}
+      handleFilterChange={handleFilterChange}
+      handleSubmit={handleSubmit}
+      loading={loading}
+      logout={logout}
+      message={message}
+      permissions={permissions}
+      priorityLabels={priorityLabels}
+      projects={projects}
+      saving={saving}
+      session={session}
+      setActivePage={setActivePage}
+      setForm={setForm}
+      stats={stats}
+      statusFilter={statusFilter}
+      statusIcons={statusIcons}
+      statusLabels={statusLabels}
+      updateStatus={updateStatus}
+      visibleNavigation={visibleNavigation}
+    />
   );
 }
 
