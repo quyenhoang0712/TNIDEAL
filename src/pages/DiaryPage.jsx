@@ -19,14 +19,13 @@ function displayDate(value) {
   return `${day}/${month}/${year}`;
 }
 
-export default function DiaryPage({ project }) {
+export default function DiaryPage({ project, diaries, setDiaries }) {
   const cameraRef = useRef(null);
   const uploadRef = useRef(null);
   const [view, setView] = useState('timeline');
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [diaries, setDiaries] = useState([{ id: 1, projectId: 'current-project', ...emptyForm, description: 'Gia công và lắp dựng cốt thép móng, hoàn thành khoảng 70% khối lượng.', issue: 'Chiều có mưa nên dừng thi công sớm.', images: [], createdAt: '2026-08-18T16:35:00' }, { id: 2, projectId: 'current-project', ...emptyForm, date: '2026-08-17', taskName: 'Bê tông lót', workerCount: 7, description: 'Hoàn thành bê tông lót khu vực móng.', issue: '', images: [], createdAt: '2026-08-17T17:00:00' }]);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -56,7 +55,14 @@ export default function DiaryPage({ project }) {
   function addImages(files, source) {
     const accepted = Array.from(files).filter((file) => /^image\/(jpeg|png|webp)$/.test(file.type)).slice(0, 10 - form.images.length);
     const capturedAt = new Date().toISOString();
-    const append = (position = {}) => setForm((current) => ({ ...current, images: [...current.images, ...accepted.map((file) => ({ id: `${Date.now()}-${file.name}`, url: URL.createObjectURL(file), name: file.name, type: 'PROGRESS', capturedAt, source, latitude: position.latitude, longitude: position.longitude, note: '' }))] }));
+    const append = async (position = {}) => {
+      const encoded = await Promise.all(accepted.map((file) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ id: `${Date.now()}-${file.name}`, url: reader.result, name: file.name, type: 'PROGRESS', capturedAt, source, latitude: position.latitude, longitude: position.longitude, note: '' });
+        reader.readAsDataURL(file);
+      })));
+      setForm((current) => ({ ...current, images: [...current.images, ...encoded] }));
+    };
     if (source === 'camera' && navigator.geolocation) navigator.geolocation.getCurrentPosition(({ coords }) => append({ latitude: coords.latitude, longitude: coords.longitude }), () => append());
     else append();
   }

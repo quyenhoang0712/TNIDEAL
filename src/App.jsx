@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   CirclePlus,
   Clock3,
-  DatabaseZap,
   DollarSign,
   Eye,
   EyeOff,
@@ -69,8 +68,8 @@ const roles = {
     icon: ShieldCheck,
     permissions: {
       create: false,
-      updateStatus: false,
-      delete: false
+      updateStatus: true,
+      delete: true
     }
   },
   contractor: {
@@ -152,35 +151,27 @@ const navigationItems = [
   },
   {
     id: 'users',
-    label: 'Người dùng',
+    label: 'Tài khoản thầu',
     icon: UserCog,
     roles: ['admin'],
-    title: 'Quản lý người dùng',
-    description: 'Admin tạo, khóa, mở và chỉnh thông tin tài khoản trong hệ thống.'
+    title: 'Tài khoản thầu',
+    description: 'Quản lý những nhà thầu được phép sử dụng hệ thống.'
   },
   {
-    id: 'roles',
-    label: 'Phân quyền',
-    icon: ShieldCheck,
+    id: 'admin-projects',
+    label: 'Công trình',
+    icon: Building2,
     roles: ['admin'],
-    title: 'Phân quyền',
-    description: 'Admin kiểm soát vai trò người dùng và quyền truy cập từng nhóm.'
+    title: 'Quản lý công trình',
+    description: 'Theo dõi toàn bộ công trình và nhà thầu phụ trách.'
   },
   {
-    id: 'data-fixes',
-    label: 'Sửa dữ liệu',
-    icon: DatabaseZap,
+    id: 'activity-log',
+    label: 'Nhật ký hoạt động',
+    icon: Clock3,
     roles: ['admin'],
-    title: 'Sửa dữ liệu lỗi',
-    description: 'Admin hỗ trợ chỉnh dữ liệu nhập sai, dữ liệu trùng hoặc thông tin bị lệch.'
-  },
-  {
-    id: 'system-errors',
-    label: 'Lỗi hệ thống',
-    icon: Activity,
-    roles: ['admin'],
-    title: 'Lỗi hệ thống',
-    description: 'Admin xem lỗi đăng nhập, lỗi kết nối, lỗi dữ liệu và trạng thái API.'
+    title: 'Nhật ký hoạt động',
+    description: 'Theo dõi tài khoản nào đã thực hiện thay đổi trên hệ thống.'
   },
   {
     id: 'workers',
@@ -220,7 +211,7 @@ const navigationItems = [
     icon: Settings,
     roles: ['admin'],
     title: 'Cài đặt hệ thống',
-    description: 'Admin cấu hình hệ thống, kết nối triển khai và thông tin hỗ trợ.'
+    description: 'Quản lý thông tin Admin và cấu hình chung.'
   }
 ];
 
@@ -385,13 +376,9 @@ function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [authErrors, setAuthErrors] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
-  const [activePage, setActivePage] = useState(() =>
-    session?.user?.role === 'contractor' && readSavedProjectSetup(session.user.id) ? 'projects' : 'overview'
-  );
+  const [activePage, setActivePage] = useState('overview');
   const [showProjectSetup, setShowProjectSetup] = useState(false);
-  const [completedProjectSetup, setCompletedProjectSetup] = useState(() =>
-    readSavedProjectSetup(session?.user?.id)
-  );
+  const [completedProjectSetup, setCompletedProjectSetup] = useState(null);
   const [projectSetupStep, setProjectSetupStep] = useState('details');
   const [projectSetupForm, setProjectSetupForm] = useState(emptyProjectSetupForm);
   const [projectSetupError, setProjectSetupError] = useState('');
@@ -403,6 +390,7 @@ function App() {
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
   const [loading, setLoading] = useState(true);
+  const [constructionLoading, setConstructionLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const currentRole = roles[session?.user.role || 'contractor'];
@@ -411,9 +399,9 @@ function App() {
   const activeNavigation = visibleNavigation.find((item) => item.id === activePage) || visibleNavigation[0];
   const ActivePageIcon = activeNavigation?.icon || BarChart3;
   const activeNavigationId = activeNavigation?.id || 'overview';
-  const isCheckingFirstProject = session?.user.role === 'contractor' && activeNavigationId === 'projects' && loading;
+  const isCheckingFirstProject = session?.user.role === 'contractor' && activeNavigationId === 'projects' && (loading || constructionLoading);
   const shouldShowFirstProjectPrompt =
-    session?.user.role === 'contractor' && activeNavigationId === 'projects' && !loading && !completedProjectSetup;
+    session?.user.role === 'contractor' && activeNavigationId === 'projects' && !loading && !constructionLoading && !completedProjectSetup;
   const calendarDays = getCalendarDays(calendarMonth);
   const selectedStartDate = projectSetupForm.startDate;
   const cleanMapUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=15&output=embed`;
@@ -467,22 +455,25 @@ function App() {
   }, [loadProjects]);
 
   useEffect(() => {
-    const savedSetup = readSavedProjectSetup(session?.user?.id);
-    setCompletedProjectSetup(savedSetup);
-
-    if (session?.user?.role === 'contractor' && savedSetup) {
-      if (savedSetup.jobDraft) {
-        setForm(savedSetup.jobDraft);
-      } else {
-        setForm((current) => ({
-          ...current,
-          title: savedSetup.name || current.title,
-          category: projectTypeLabels[savedSetup.type] || current.category
-        }));
+    if (session?.user?.role !== 'contractor' || !session.token) { setConstructionLoading(false); return; }
+    let cancelled = false;
+    setConstructionLoading(true);
+    const legacySetup = readSavedProjectSetup(session.user.id);
+    const migrate = legacySetup && !legacySetup.id
+      ? request('/api/constructions', { method: 'POST', body: JSON.stringify(legacySetup) }, session.token)
+      : Promise.resolve(null);
+    migrate.then(() => request('/api/constructions', {}, session.token)).then((constructions) => {
+      if (cancelled) return;
+      const current = constructions[0] || null;
+      setCompletedProjectSetup(current);
+      if (current) {
+        setForm((value) => ({ ...value, title: current.name, category: projectTypeLabels[current.type] || value.category }));
+        setActivePage('projects');
       }
-      setActivePage('projects');
-    }
-  }, [session?.user?.id, session?.user?.role]);
+      localStorage.removeItem(getProjectSetupStorageKey(session.user.id));
+    }).catch((error) => { if (!cancelled) setMessage(error.message); }).finally(() => { if (!cancelled) setConstructionLoading(false); });
+    return () => { cancelled = true; };
+  }, [session?.token, session?.user?.id, session?.user?.role]);
 
   useEffect(() => {
     if (session && activeNavigationId !== activePage) {
@@ -746,7 +737,7 @@ function App() {
     setProjectSetupStep('cost');
   }
 
-  function handleProjectCostSubmit(event) {
+  async function handleProjectCostSubmit(event) {
     event.preventDefault();
     const duration = Number(projectSetupForm.duration);
     const upperFloors = Number(projectSetupForm.upperFloors || 0);
@@ -799,7 +790,18 @@ function App() {
       completedAt: new Date().toISOString()
     };
 
-    localStorage.setItem(getProjectSetupStorageKey(session.user.id), JSON.stringify(savedSetup));
+    try {
+      const savedConstruction = await request('/api/constructions', {
+        method: 'POST',
+        body: JSON.stringify(projectSetupForm)
+      }, session.token);
+      savedSetup.id = savedConstruction._id;
+      savedSetup.code = savedConstruction.code;
+    } catch (error) {
+      setProjectSetupError(error.message);
+      return;
+    }
+
     setCompletedProjectSetup(savedSetup);
     setForm(preparedJob);
     setStatusFilter('all');
@@ -867,6 +869,16 @@ function App() {
         setProjectSetupError('Không lấy được vị trí hiện tại. Vui lòng cho phép quyền vị trí trong trình duyệt.');
       }
     );
+  }
+
+  function openNewProjectSetup() {
+    setProjectSetupForm(emptyProjectSetupForm);
+    setProjectSetupError('');
+    setProjectSetupStep('details');
+    setShowDatePicker(false);
+    setMapQuery('Việt Nam');
+    setMapPinPosition({ x: 50, y: 50 });
+    setShowProjectSetup(true);
   }
 
   if (!session) {
@@ -1015,7 +1027,7 @@ function App() {
     );
   }
 
-  if (shouldShowFirstProjectPrompt) {
+  if (shouldShowFirstProjectPrompt || showProjectSetup) {
     return (
       <main className="first-project-shell">
         <button className="first-project-logout" type="button" onClick={logout}>
@@ -1032,12 +1044,7 @@ function App() {
           <button
             className="primary-button"
             type="button"
-            onClick={() => {
-              setProjectSetupForm(emptyProjectSetupForm);
-              setProjectSetupError('');
-              setProjectSetupStep('details');
-              setShowProjectSetup(true);
-            }}
+            onClick={openNewProjectSetup}
           >
             <CirclePlus size={18} />
             Tạo công trình phần thô
@@ -1222,6 +1229,7 @@ function App() {
       loading={loading}
       logout={logout}
       message={message}
+      openNewProjectSetup={openNewProjectSetup}
       permissions={permissions}
       priorityLabels={priorityLabels}
       projects={projects}

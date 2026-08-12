@@ -20,8 +20,15 @@ import {
   UsersRound,
   X
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DiaryPage from './DiaryPage';
+
+async function workspaceRequest(token, options = {}) {
+  const response = await fetch('/api/workspace', { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || 'Không thể đồng bộ dữ liệu MongoDB');
+  return data;
+}
 
 const placeholderItems = {
   users: ['Tạo tài khoản người dùng mới.', 'Khóa hoặc mở tài khoản khi có vấn đề.', 'Đặt lại mật khẩu cho user khi cần hỗ trợ.'],
@@ -52,6 +59,7 @@ export default function DashboardPage({
   loading,
   logout,
   message,
+  openNewProjectSetup,
   permissions,
   priorityLabels,
   projects,
@@ -106,18 +114,20 @@ export default function DashboardPage({
     { id: 2, projectId: 'current-project', type: 'TRANSPORT', description: 'Vận chuyển thép đến công trình', amount: 2200000, category: 'Móng', date: '16/08/2026', note: 'Xe 5 tấn' },
     { id: 3, projectId: 'current-project', type: 'UTILITIES', description: 'Điện nước công trường', amount: 1200000, category: 'Chuẩn bị & mặt bằng', date: '18/08/2026', note: '' }
   ]);
+  const [diaries, setDiaries] = useState([]);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
   const completedJobs = Math.min(7, projects.filter((project) => project.status === 'done').length);
   const overallProgress = projects.length ? Math.round((completedJobs / projects.length) * 100) : 0;
   const constructionStatus = overallProgress === 100 ? 'Hoàn thành' : projects.some((project) => project.status === 'active') ? 'Đang thi công' : 'Chuẩn bị thi công';
   const constructionStatusClass = overallProgress === 100 ? 'done' : projects.some((project) => project.status === 'active') ? 'active' : 'planning';
   const roughCategories = ['Chuẩn bị & mặt bằng', 'Móng', 'Khung BTCT', 'Xây tường', 'Cầu thang', 'Mái', 'Tô/trát'];
   const foundationTasks = ['Đào đất móng', 'Đổ bê tông lót', 'Gia công cốt thép móng', 'Lắp dựng cốp pha', 'Đổ bê tông móng', 'Tháo cốp pha', 'Lấp đất'];
-  const constructionTeams = [
+  const [constructionTeams, setConstructionTeams] = useState([
     { id: 1, name: 'Đội thi công 01', leader: 'Nguyễn Văn Hùng', phone: '0901 234 567', members: 8, present: 7, project: completedProjectSetup?.name || 'Nhà A Tín', category: 'Móng', task: 'Gia công cốt thép móng', status: 'active' },
     { id: 2, name: 'Đội thi công 02', leader: 'Trần Minh Đức', phone: '0902 345 678', members: 7, present: 7, project: completedProjectSetup?.name || 'Nhà A Tín', category: 'Khung BTCT', task: 'Lắp dựng cốp pha cột', status: 'active' },
     { id: 3, name: 'Đội thi công 03', leader: 'Lê Quốc Nam', phone: '0903 456 789', members: 6, present: 5, project: completedProjectSetup?.name || 'Nhà A Tín', category: 'Xây tường', task: 'Chuẩn bị vật tư', status: 'waiting' },
     { id: 4, name: 'Đội thi công 04', leader: 'Phạm Anh Tuấn', phone: '0904 567 890', members: 5, present: 4, project: completedProjectSetup?.name || 'Nhà A Tín', category: 'Mái', task: 'Chờ phân công', status: 'paused' }
-  ];
+  ]);
   const filteredTeams = constructionTeams.filter((team) => {
     const query = workerSearch.trim().toLocaleLowerCase('vi');
     const matchesSearch = !query || [team.name, team.leader, team.project, team.category].some((value) => value.toLocaleLowerCase('vi').includes(query));
@@ -138,10 +148,16 @@ export default function DashboardPage({
   });
   const filteredMaterials = materials.filter((material) => material.name.toLocaleLowerCase('vi').includes(materialSearch.trim().toLocaleLowerCase('vi')));
   const totalImportValue = materialTransactions.filter((transaction) => transaction.type === 'IMPORT').reduce((sum, transaction) => sum + transaction.quantity * transaction.unitPrice, 0);
-  const laborCosts = [
+  const [laborCosts, setLaborCosts] = useState([
     { id: 1, projectId: 'current-project', name: 'Đội thi công 01', category: 'Móng', paymentType: 'DAILY', workUnits: 20, dailyRate: 500000, contractAmount: 0, date: '17/08/2026' },
     { id: 2, projectId: 'current-project', name: 'Đội thi công 02', category: 'Khung BTCT', paymentType: 'CONTRACT', workUnits: 0, dailyRate: 0, contractAmount: 35000000, date: '18/08/2026' }
-  ];
+  ]);
+  const [projectFiles, setProjectFiles] = useState([
+    { group: 'Bản vẽ', files: ['Bản vẽ kiến trúc.pdf', 'Bản vẽ kết cấu.pdf'] },
+    { group: 'Hợp đồng', files: ['Hợp đồng thi công.pdf'] },
+    { group: 'Pháp lý / tài liệu khác', files: ['Giấy phép xây dựng.pdf'] }
+  ]);
+  const initialWorkspace = useRef({ materialTransactions, purchaseRequests, expenses, diaries, constructionTeams, laborCosts, projectFiles });
   const dateKey = (value) => { const [day, month, year] = String(value).split('/'); return year && month && day ? `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}` : value; };
   const inCostDateRange = (date) => (!costFromDate || dateKey(date) >= costFromDate) && (!costToDate || dateKey(date) <= costToDate);
   const costMaterialTransactions = materialTransactions.filter((entry) => entry.projectId === 'current-project' && entry.type === 'IMPORT' && inCostDateRange(entry.date));
@@ -156,6 +172,35 @@ export default function DashboardPage({
   const formatMoney = (value) => `${Number(value).toLocaleString('vi-VN')}đ`;
   const formatCompactMoney = (value) => value >= 1000000 ? `${(value / 1000000).toLocaleString('vi-VN', { maximumFractionDigits: 1 })} triệu` : formatMoney(value);
   const expenseLabels = { MACHINE: 'Máy móc / thiết bị', TRANSPORT: 'Vận chuyển', UTILITIES: 'Điện nước', OTHER: 'Khác' };
+
+  useEffect(() => {
+    if (session.user.role !== 'contractor') return;
+    let cancelled = false;
+    workspaceRequest(session.token).then(async (data) => {
+      if (cancelled) return;
+      if (data._id) {
+        setMaterialTransactions(data.materialTransactions || []);
+        setPurchaseRequests(data.purchaseRequests || []);
+        setExpenses(data.expenses || []);
+        setDiaries(data.diaries || []);
+        setConstructionTeams(data.constructionTeams?.length ? data.constructionTeams : initialWorkspace.current.constructionTeams);
+        setLaborCosts(data.laborCosts?.length ? data.laborCosts : initialWorkspace.current.laborCosts);
+        setProjectFiles(data.projectFiles?.length ? data.projectFiles : initialWorkspace.current.projectFiles);
+      } else {
+        await workspaceRequest(session.token, { method: 'PUT', body: JSON.stringify(initialWorkspace.current) });
+      }
+      if (!cancelled) setWorkspaceReady(true);
+    }).catch(() => { if (!cancelled) setWorkspaceReady(true); });
+    return () => { cancelled = true; };
+  }, [session.token, session.user.role]);
+
+  useEffect(() => {
+    if (!workspaceReady || session.user.role !== 'contractor') return undefined;
+    const timeout = window.setTimeout(() => {
+      workspaceRequest(session.token, { method: 'PUT', body: JSON.stringify({ materialTransactions, purchaseRequests, expenses, diaries, constructionTeams, laborCosts, projectFiles }) });
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [constructionTeams, diaries, expenses, laborCosts, materialTransactions, projectFiles, purchaseRequests, session.token, session.user.role, workspaceReady]);
 
   function saveMaterialImport(event) {
     event.preventDefault();
@@ -301,7 +346,12 @@ export default function DashboardPage({
                     <p><MapPin size={17} />{completedProjectSetup.fullAddress || completedProjectSetup.location}</p>
                   </div>
                 </div>
-                <span className={`status-pill ${constructionStatusClass}`}>{constructionStatus}</span>
+                <div className="saved-project-heading-actions">
+                  <span className={`status-pill ${constructionStatusClass}`}>{constructionStatus}</span>
+                  <button className="primary-button" type="button" onClick={openNewProjectSetup}>
+                    <CirclePlus size={18} />Tạo công trình mới
+                  </button>
+                </div>
               </div>
 
               <div className="saved-project-details">
@@ -383,7 +433,7 @@ export default function DashboardPage({
             </section>
           )}
 
-          {activeNavigationId === 'diary' && <DiaryPage project={completedProjectSetup} />}
+          {activeNavigationId === 'diary' && <DiaryPage project={completedProjectSetup} diaries={diaries} setDiaries={setDiaries} />}
 
           {showExpenseModal && <section className="jobs-modal" role="dialog" aria-modal="true" aria-label="Thêm chi phí"><form className="jobs-modal-card material-import-modal" onSubmit={saveExpense}><div className="jobs-modal-header"><div><span className="eyebrow">Chi phí phát sinh</span><h2>Thêm chi phí</h2></div><button type="button" onClick={() => setShowExpenseModal(false)} aria-label="Đóng"><X size={22} /></button></div><div className="material-import-form"><label>Dự án *<select><option>{completedProjectSetup?.name || 'Nhà A Tín'}</option></select></label><label>Hạng mục<select value={expenseForm.category} onChange={(event) => setExpenseForm({ ...expenseForm, category: event.target.value })}><option>Chuẩn bị & mặt bằng</option><option>Móng</option><option>Khung BTCT</option><option>Xây tường</option></select></label><label>Loại chi phí *<select value={expenseForm.type} onChange={(event) => setExpenseForm({ ...expenseForm, type: event.target.value })}>{Object.entries(expenseLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Nội dung *<input required value={expenseForm.description} onChange={(event) => setExpenseForm({ ...expenseForm, description: event.target.value })} placeholder="Ví dụ: Thuê máy xúc 1 ngày" /></label><label>Số tiền *<input required min="1" type="number" value={expenseForm.amount} onChange={(event) => setExpenseForm({ ...expenseForm, amount: event.target.value })} /></label><label>Ngày *<input required value={expenseForm.date} onChange={(event) => setExpenseForm({ ...expenseForm, date: event.target.value })} /></label><label>Ghi chú<textarea rows="3" value={expenseForm.note} onChange={(event) => setExpenseForm({ ...expenseForm, note: event.target.value })} /></label><div className="modal-actions"><button className="ghost-button" type="button" onClick={() => setShowExpenseModal(false)}>Hủy</button><button className="primary-button" type="submit">Lưu chi phí</button></div></div></form></section>}
 
