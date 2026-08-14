@@ -7,31 +7,24 @@ import {
   CirclePlus,
   Clock3,
   DollarSign,
-  Eye,
-  EyeOff,
   FolderKanban,
   HardHat,
-  KeyRound,
-  LogIn,
   LogOut,
   Loader2,
   Package,
   Settings,
   ShieldCheck,
   Trash2,
-  UserPlus,
-  UserRound,
   UserCog,
   UsersRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import ProjectAccessStep from './components/project-setup/ProjectAccessStep';
-import ProjectCostStep from './components/project-setup/ProjectCostStep';
-import ProjectDetailsStep from './components/project-setup/ProjectDetailsStep';
-import ProjectLandStep from './components/project-setup/ProjectLandStep';
-import ProjectLocationStep from './components/project-setup/ProjectLocationStep';
+import ProjectSetupModal from './components/project-setup/ProjectSetupModal';
 import AdminPage from './pages/AdminPage';
+import AuthPage from './pages/AuthPage';
 import UserPage from './pages/UserPage';
+import { createConstruction, getConstructions } from './services/constructionApi';
+import { createProgressTask, deleteProgressTask as removeProgressTask, getProgressTasks, updateProgressStatus } from './services/progressApi';
 
 const emptyForm = {
   title: '',
@@ -82,13 +75,6 @@ const roles = {
       delete: false
     }
   }
-};
-
-const emptyAuthForm = {
-  username: '',
-  displayName: '',
-  password: '',
-  confirmPassword: ''
 };
 
 const emptyProjectSetupForm = {
@@ -214,29 +200,6 @@ const navigationItems = [
     description: 'Quản lý thông tin Admin và cấu hình chung.'
   }
 ];
-
-async function request(path, options = {}, token = '') {
-  const response = await fetch(path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers
-    },
-    ...options
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    throw new Error(data.message || 'Có lỗi xảy ra');
-  }
-
-  return data;
-}
-
-function isStrongPassword(password) {
-  return /[A-Z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
-}
 
 function formatCurrencyInput(value) {
   const digits = String(value).replace(/\D/g, '');
@@ -368,13 +331,6 @@ function App() {
       return null;
     }
   });
-  const [authMode, setAuthMode] = useState('login');
-  const [authForm, setAuthForm] = useState(emptyAuthForm);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authMessage, setAuthMessage] = useState('');
-  const [authErrors, setAuthErrors] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
   const [activePage, setActivePage] = useState('overview');
   const [showProjectSetup, setShowProjectSetup] = useState(false);
@@ -440,15 +396,14 @@ function App() {
     setMessage('');
 
     try {
-      const query = statusFilter === 'all' ? '' : `?status=${statusFilter}`;
-      const data = await request(`/api/projects${query}`, {}, session.token);
+      const data = await getProgressTasks(session.token, { status: statusFilter, constructionId: completedProjectSetup?._id });
       setProjects(data);
     } catch (error) {
       setMessage(error.message);
     } finally {
       setLoading(false);
     }
-  }, [session?.token, statusFilter]);
+  }, [completedProjectSetup?._id, session?.token, statusFilter]);
 
   useEffect(() => {
     loadProjects();
@@ -460,9 +415,9 @@ function App() {
     setConstructionLoading(true);
     const legacySetup = readSavedProjectSetup(session.user.id);
     const migrate = legacySetup && !legacySetup.id
-      ? request('/api/constructions', { method: 'POST', body: JSON.stringify(legacySetup) }, session.token)
+      ? createConstruction(session.token, legacySetup)
       : Promise.resolve(null);
-    migrate.then(() => request('/api/constructions', {}, session.token)).then((constructions) => {
+    migrate.then(() => getConstructions(session.token)).then((constructions) => {
       if (cancelled) return;
       const current = constructions[0] || null;
       setCompletedProjectSetup(current);
@@ -481,96 +436,16 @@ function App() {
     }
   }, [activeNavigationId, activePage, session]);
 
-  useEffect(() => {
-    if (!authMessage) return undefined;
-
-    const timeoutId = window.setTimeout(() => {
-      setAuthMessage('');
-    }, 4200);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [authMessage]);
-
-  async function handleAuthSubmit(event) {
-    event.preventDefault();
-    const nextErrors = {};
-    setAuthLoading(true);
-    setAuthMessage('');
-    setAuthErrors({});
-
-    if (authForm.username.trim().length < 3) {
-      nextErrors.username = true;
-      setAuthLoading(false);
-      setAuthMessage('Tên đăng nhập phải có ít nhất 3 ký tự.');
-      setAuthErrors(nextErrors);
-      return;
-    }
-
-    if (!authForm.password) {
-      nextErrors.password = true;
-      setAuthLoading(false);
-      setAuthMessage('Vui lòng nhập mật khẩu.');
-      setAuthErrors(nextErrors);
-      return;
-    }
-
-    if (authMode === 'register') {
-      if (authForm.displayName.trim().length < 2) {
-        nextErrors.displayName = true;
-        setAuthLoading(false);
-        setAuthMessage('Tên người dùng phải có ít nhất 2 ký tự.');
-        setAuthErrors(nextErrors);
-        return;
-      }
-
-      if (authForm.password.length < 8 || !isStrongPassword(authForm.password)) {
-        nextErrors.password = true;
-        setAuthLoading(false);
-        setAuthMessage('Mật khẩu phải có ít nhất 8 ký tự, 1 chữ hoa, 1 số và 1 ký tự đặc biệt.');
-        setAuthErrors(nextErrors);
-        return;
-      }
-
-      if (authForm.password !== authForm.confirmPassword) {
-        nextErrors.password = true;
-        nextErrors.confirmPassword = true;
-        setAuthLoading(false);
-        setAuthMessage('Mật khẩu nhập lại không khớp.');
-        setAuthErrors(nextErrors);
-        return;
-      }
-    }
-
-    try {
-      const data = await request(`/api/auth/${authMode}`, {
-        method: 'POST',
-        body: JSON.stringify(authForm)
-      });
-
-      localStorage.setItem('tnideal_session', JSON.stringify(data));
-      setSession(data);
-      setAuthForm(emptyAuthForm);
-      setAuthErrors({});
-      setShowPassword(false);
-      setShowConfirmPassword(false);
-      setMessage('');
-    } catch (error) {
-      setAuthMessage(error.message);
-    } finally {
-      setAuthLoading(false);
-    }
+  function handleAuthenticated(data) {
+    localStorage.setItem('tnideal_session', JSON.stringify(data));
+    setSession(data);
+    setMessage('');
   }
 
   function logout() {
     localStorage.removeItem('tnideal_session');
     setSession(null);
     setProjects([]);
-    setAuthMode('login');
-    setAuthForm(emptyAuthForm);
-    setAuthErrors({});
-    setShowPassword(false);
-    setShowConfirmPassword(false);
-    setAuthMessage('');
     setActivePage('overview');
     setMessage('');
   }
@@ -587,10 +462,7 @@ function App() {
     setMessage('');
 
     try {
-      await request('/api/projects', {
-        method: 'POST',
-        body: JSON.stringify(form)
-      }, session.token);
+      await createProgressTask(session.token, { ...form, constructionId: completedProjectSetup?._id });
       setForm(emptyForm);
       await loadProjects();
       setMessage('Đã thêm công việc mới.');
@@ -608,10 +480,7 @@ function App() {
     }
 
     try {
-      await request(`/api/projects/${project._id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status })
-      }, session.token);
+      await updateProgressStatus(session.token, project._id, status);
       await loadProjects();
     } catch (error) {
       setMessage(error.message);
@@ -625,7 +494,7 @@ function App() {
     }
 
     try {
-      await request(`/api/projects/${projectId}`, { method: 'DELETE' }, session.token);
+      await removeProgressTask(session.token, projectId);
       await loadProjects();
       setMessage('Đã xóa công việc.');
     } catch (error) {
@@ -791,10 +660,7 @@ function App() {
     };
 
     try {
-      const savedConstruction = await request('/api/constructions', {
-        method: 'POST',
-        body: JSON.stringify(projectSetupForm)
-      }, session.token);
+      const savedConstruction = await createConstruction(session.token, projectSetupForm);
       savedSetup.id = savedConstruction._id;
       savedSetup.code = savedConstruction.code;
     } catch (error) {
@@ -881,151 +747,7 @@ function App() {
     setShowProjectSetup(true);
   }
 
-  if (!session) {
-    return (
-      <main className="auth-shell">
-        <div className="toast-stack" aria-live="polite">
-          {authMode === 'register' && (
-            <p className="toast warning">Mật khẩu cần có ít nhất 8 ký tự, 1 chữ hoa, 1 số và 1 ký tự đặc biệt.</p>
-          )}
-          {authMessage && <p className="toast success">{authMessage}</p>}
-        </div>
-        <section className="auth-card">
-          <div className="auth-visual" aria-hidden="true">
-            <div className="brand-mark">
-              <Building2 size={22} />
-            </div>
-            <div>
-              <span className="auth-kicker">TN Ideal</span>
-              <h2>Trung tâm quản lý công trình</h2>
-              <p>Theo dõi công việc, quản lý đội thợ và nắm tiến độ thi công trong một nơi.</p>
-            </div>
-          </div>
-
-          <div className="auth-panel">
-            <div className="auth-copy">
-              <span className="eyebrow">Đăng nhập hệ thống</span>
-              <h1>{authMode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}</h1>
-            </div>
-
-            <form className="auth-form" noValidate onSubmit={handleAuthSubmit}>
-              <label>
-                Tên đăng nhập
-                <span className={`input-shell ${authErrors.username ? 'error' : ''}`}>
-                  <UserRound size={18} />
-                  <input
-                    autoComplete="username"
-                    minLength={3}
-                    required
-                    value={authForm.username}
-                    onChange={(event) => {
-                      setAuthForm({ ...authForm, username: event.target.value });
-                      setAuthErrors({ ...authErrors, username: false });
-                    }}
-                    placeholder="Nhập tên đăng nhập"
-                  />
-                </span>
-              </label>
-              {authMode === 'register' && (
-                <label>
-                  Tên người dùng
-                  <span className={`input-shell ${authErrors.displayName ? 'error' : ''}`}>
-                    <UserRound size={18} />
-                    <input
-                      autoComplete="name"
-                      minLength={2}
-                      required
-                      value={authForm.displayName}
-                      onChange={(event) => {
-                        setAuthForm({ ...authForm, displayName: event.target.value });
-                        setAuthErrors({ ...authErrors, displayName: false });
-                      }}
-                      placeholder="Nhập tên người dùng"
-                    />
-                  </span>
-                </label>
-              )}
-              <label>
-                Mật khẩu
-                <span className={`input-shell ${authErrors.password ? 'error' : ''}`}>
-                  <KeyRound size={18} />
-                  <input
-                    autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                    minLength={authMode === 'register' ? 8 : undefined}
-                    required
-                    type={showPassword ? 'text' : 'password'}
-                    value={authForm.password}
-                    onChange={(event) => {
-                      setAuthForm({ ...authForm, password: event.target.value });
-                      setAuthErrors({ ...authErrors, password: false });
-                    }}
-                    placeholder={authMode === 'login' ? 'Nhập mật khẩu' : 'Ví dụ: Matkhau@123'}
-                  />
-                  <button
-                    aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                    className="password-toggle"
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </span>
-              </label>
-              {authMode === 'register' && (
-                <label>
-                  Nhập lại mật khẩu
-                  <span className={`input-shell ${authErrors.confirmPassword ? 'error' : ''}`}>
-                    <KeyRound size={18} />
-                    <input
-                      autoComplete="new-password"
-                      minLength={8}
-                      required
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={authForm.confirmPassword}
-                      onChange={(event) => {
-                        setAuthForm({ ...authForm, confirmPassword: event.target.value });
-                        setAuthErrors({ ...authErrors, confirmPassword: false });
-                      }}
-                      placeholder="Nhập lại mật khẩu"
-                    />
-                    <button
-                      aria-label={showConfirmPassword ? 'Ẩn mật khẩu nhập lại' : 'Hiện mật khẩu nhập lại'}
-                      className="password-toggle"
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    >
-                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </span>
-                </label>
-              )}
-              <button className="primary-button auth-submit" disabled={authLoading} type="submit">
-                {authLoading ? (
-                  <Loader2 className="spin" size={18} />
-                ) : authMode === 'login' ? (
-                  <LogIn size={18} />
-                ) : (
-                  <UserPlus size={18} />
-                )}
-                {authMode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản'}
-              </button>
-
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => {
-                  setAuthMode(authMode === 'login' ? 'register' : 'login');
-                  setAuthMessage('');
-                }}
-              >
-                {authMode === 'login' ? 'Tạo tài khoản' : 'Quay lại đăng nhập'}
-              </button>
-            </form>
-          </div>
-        </section>
-      </main>
-    );
-  }
+  if (!session) return <AuthPage onAuthenticated={handleAuthenticated} />;
 
   if (shouldShowFirstProjectPrompt || showProjectSetup) {
     return (
@@ -1051,154 +773,40 @@ function App() {
           </button>
         </section>
 
-        {showProjectSetup && (
-          <section className="project-setup-modal" aria-label="Tạo công trình phần thô">
-            <form
-              className={`project-setup-card ${projectSetupStep === 'location' ? 'location-card' : ''}`}
-              onSubmit={
-                projectSetupStep === 'details'
-                  ? handleProjectSetupSubmit
-                  : projectSetupStep === 'location'
-                    ? handleProjectLocationSubmit
-                    : projectSetupStep === 'access'
-                      ? handleProjectAccessSubmit
-                      : projectSetupStep === 'land'
-                        ? handleProjectLandSubmit
-                        : handleProjectCostSubmit
-              }
-            >
-              <div>
-                <span className="eyebrow">
-                  {projectSetupStep === 'details'
-                    ? 'Công trình phần thô'
-                    : projectSetupStep === 'location'
-                      ? 'Địa điểm công trình'
-                      : projectSetupStep === 'access'
-                        ? 'Đường vào công trình'
-                        : projectSetupStep === 'land'
-                          ? 'Kích thước đất'
-                          : 'Tính chi phí'}
-                </span>
-                <h2>
-                  {projectSetupStep === 'details'
-                    ? 'Tạo công trình phần thô'
-                    : projectSetupStep === 'location'
-                      ? 'Dự án này ở đâu?'
-                      : projectSetupStep === 'access'
-                        ? 'Vật tư vào công trình thế nào?'
-                        : projectSetupStep === 'land'
-                          ? 'Miếng đất rộng bao nhiêu?'
-                          : 'Chi phí phần thô khoảng bao nhiêu?'}
-                </h2>
-              </div>
-
-              {projectSetupStep === 'details' && (
-                <ProjectDetailsStep
-                  form={projectSetupForm}
-                  setForm={setProjectSetupForm}
-                  clearError={() => setProjectSetupError('')}
-                  projectTypeLabels={projectTypeLabels}
-                  showDatePicker={showDatePicker}
-                  setShowDatePicker={setShowDatePicker}
-                  calendarMonth={calendarMonth}
-                  setCalendarMonth={setCalendarMonth}
-                  calendarDays={calendarDays}
-                  selectedStartDate={selectedStartDate}
-                  monthNames={monthNames}
-                  formatVietnamDate={formatVietnamDate}
-                />
-              )}
-
-              {projectSetupStep === 'location' && (
-                <ProjectLocationStep
-                  form={projectSetupForm}
-                  setForm={setProjectSetupForm}
-                  clearError={() => setProjectSetupError('')}
-                  cleanMapUrl={cleanMapUrl}
-                  mapPinPosition={mapPinPosition}
-                  searchProjectLocation={searchProjectLocation}
-                  useCurrentLocation={useCurrentLocation}
-                  handleMapPinPointerDown={handleMapPinPointerDown}
-                  moveMapPin={moveMapPin}
-                />
-              )}
-
-              {projectSetupStep === 'access' && (
-                <ProjectAccessStep
-                  form={projectSetupForm}
-                  setForm={setProjectSetupForm}
-                  clearError={() => setProjectSetupError('')}
-                />
-              )}
-
-              {projectSetupStep === 'land' && (
-                <ProjectLandStep
-                  form={projectSetupForm}
-                  setForm={setProjectSetupForm}
-                  clearError={() => setProjectSetupError('')}
-                  landLength={landLength}
-                  landWidth={landWidth}
-                  landPreviewWidth={landPreviewWidth}
-                  landPreviewHeight={landPreviewHeight}
-                  landArea={landArea}
-                />
-              )}
-
-              {projectSetupStep === 'cost' && (
-                <ProjectCostStep
-                  form={projectSetupForm}
-                  setForm={setProjectSetupForm}
-                  clearError={() => setProjectSetupError('')}
-                  landArea={landArea}
-                  totalFloors={projectTotalFloors}
-                  estimatedFloorArea={estimatedFloorArea}
-                  estimatedRoughCost={estimatedRoughCost}
-                  formatCurrencyInput={formatCurrencyInput}
-                />
-              )}
-
-              {projectSetupError && <p className="setup-error">{projectSetupError}</p>}
-              <div className="modal-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => {
-                    if (projectSetupStep === 'location') {
-                      setProjectSetupStep('details');
-                      setProjectSetupError('');
-                      return;
-                    }
-
-                    if (projectSetupStep === 'access') {
-                      setProjectSetupStep('location');
-                      setProjectSetupError('');
-                      return;
-                    }
-
-                    if (projectSetupStep === 'land') {
-                      setProjectSetupStep('access');
-                      setProjectSetupError('');
-                      return;
-                    }
-
-                    if (projectSetupStep === 'cost') {
-                      setProjectSetupStep('land');
-                      setProjectSetupError('');
-                      return;
-                    }
-
-                    setShowProjectSetup(false);
-                  }}
-                >
-                  {projectSetupStep === 'details' ? 'Hủy' : 'Quay lại'}
-                </button>
-                <button className="primary-button" type="submit">
-                  {projectSetupStep === 'cost' ? 'Tạo dự án' : 'Tiếp tục'}
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
+        {showProjectSetup && <ProjectSetupModal
+          step={projectSetupStep}
+          setStep={setProjectSetupStep}
+          form={projectSetupForm}
+          setForm={setProjectSetupForm}
+          error={projectSetupError}
+          setError={setProjectSetupError}
+          close={() => setShowProjectSetup(false)}
+          submitHandlers={{ details: handleProjectSetupSubmit, location: handleProjectLocationSubmit, access: handleProjectAccessSubmit, land: handleProjectLandSubmit, cost: handleProjectCostSubmit }}
+          projectTypeLabels={projectTypeLabels}
+          showDatePicker={showDatePicker}
+          setShowDatePicker={setShowDatePicker}
+          calendarMonth={calendarMonth}
+          setCalendarMonth={setCalendarMonth}
+          calendarDays={calendarDays}
+          selectedStartDate={selectedStartDate}
+          monthNames={monthNames}
+          formatVietnamDate={formatVietnamDate}
+          cleanMapUrl={cleanMapUrl}
+          mapPinPosition={mapPinPosition}
+          searchProjectLocation={searchProjectLocation}
+          useCurrentLocation={useCurrentLocation}
+          handleMapPinPointerDown={handleMapPinPointerDown}
+          moveMapPin={moveMapPin}
+          landLength={landLength}
+          landWidth={landWidth}
+          landPreviewWidth={landPreviewWidth}
+          landPreviewHeight={landPreviewHeight}
+          landArea={landArea}
+          totalFloors={projectTotalFloors}
+          estimatedFloorArea={estimatedFloorArea}
+          estimatedRoughCost={estimatedRoughCost}
+          formatCurrencyInput={formatCurrencyInput}
+        />}
       </main>
     );
   }

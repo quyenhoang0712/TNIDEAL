@@ -3,6 +3,15 @@ import dotenv from 'dotenv';
 import express from 'express';
 import mongoose from 'mongoose';
 import crypto from 'node:crypto';
+import createAuthRouter from './routes/auth.js';
+import Construction from './models/Construction.js';
+import createConstructionRouter from './routes/constructions.js';
+import MaterialWorkspace from './models/MaterialWorkspace.js';
+import createMaterialRouter from './routes/materials.js';
+import CostWorkspace from './models/CostWorkspace.js';
+import createCostRouter from './routes/costs.js';
+import ProgressTask from './models/ProgressTask.js';
+import createProgressRouter from './routes/progress.js';
 
 dotenv.config();
 
@@ -25,69 +34,6 @@ const rolePermissions = {
     delete: false
   }
 };
-
-const projectSchema = new mongoose.Schema(
-  {
-    title: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 3
-    },
-    owner: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    category: {
-      type: String,
-      required: true,
-      trim: true
-    },
-    status: {
-      type: String,
-      enum: ['planning', 'active', 'done'],
-      default: 'planning'
-    },
-    priority: {
-      type: String,
-      enum: ['low', 'medium', 'high'],
-      default: 'medium'
-    },
-    description: {
-      type: String,
-      trim: true,
-      default: ''
-    }
-  },
-  { timestamps: true }
-);
-
-const Project = mongoose.models.Project || mongoose.model('Project', projectSchema);
-
-const constructionSchema = new mongoose.Schema({
-  code: { type: String, unique: true, required: true },
-  name: { type: String, required: true, trim: true },
-  investorName: { type: String, required: true, trim: true },
-  investorPhone: { type: String, default: '' },
-  type: { type: String, default: 'house' },
-  location: { type: String, default: '' },
-  fullAddress: { type: String, default: '' },
-  provinceCity: { type: String, default: '' },
-  wardCommune: { type: String, default: '' },
-  startDate: { type: String, default: '' },
-  duration: { type: Number, default: 0 },
-  landLength: { type: Number, default: 0 },
-  landWidth: { type: Number, default: 0 },
-  upperFloors: { type: Number, default: 0 },
-  hasBasement: { type: Boolean, default: false },
-  status: { type: String, enum: ['planning', 'active', 'paused', 'done'], default: 'planning' },
-  hidden: { type: Boolean, default: false },
-  contractorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  contractorName: { type: String, required: true }
-}, { timestamps: true });
-
-const Construction = mongoose.models.Construction || mongoose.model('Construction', constructionSchema);
 
 const userSchema = new mongoose.Schema(
   {
@@ -265,16 +211,6 @@ async function requireAuth(req, res, next) {
   }
 }
 
-function requirePermission(permission) {
-  return (req, res, next) => {
-    if (!rolePermissions[req.user.role]?.[permission]) {
-      return res.status(403).json({ message: `${req.user.role} role cannot perform this action` });
-    }
-
-    return next();
-  };
-}
-
 function requireAdmin(req, res, next) {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Chỉ quản trị viên được thực hiện thao tác này' });
@@ -300,120 +236,11 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, service: 'tnideal-api' });
 });
 
-app.post(
-  '/api/auth/login',
-  asyncHandler(async (req, res) => {
-    await connectDatabase();
-
-    const username = String(req.body.username || '').trim().toLowerCase();
-    const password = String(req.body.password || '');
-    const user = await User.findOne({ username });
-
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-      return res.status(401).json({ message: 'Username or password is incorrect' });
-    }
-
-    if (user.active === false) {
-      return res.status(403).json({ message: 'Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên' });
-    }
-
-    if (!rolePermissions[user.role]) {
-      return res.status(403).json({ message: 'This account role is no longer supported' });
-    }
-
-    user.lastLoginAt = new Date();
-    await user.save();
-    await writeActivity(user, 'Đăng nhập hệ thống', 'account', user.username);
-
-    return res.json({
-      token: signToken(user),
-      user: {
-        id: user._id,
-        username: user.username,
-        displayName: user.displayName,
-        role: user.role
-      }
-    });
-  })
-);
-
-app.post(
-  '/api/auth/register',
-  asyncHandler(async (req, res) => {
-    await connectDatabase();
-
-    const username = String(req.body.username || '').trim().toLowerCase();
-    const displayName = String(req.body.displayName || '').trim();
-    const password = String(req.body.password || '');
-    const confirmPassword = String(req.body.confirmPassword || '');
-
-    if (username.length < 3) {
-      return res.status(400).json({ message: 'Username must have at least 3 characters' });
-    }
-
-    if (displayName.length < 2) {
-      return res.status(400).json({ message: 'Display name must have at least 2 characters' });
-    }
-
-    if (password.length < 8 || !isStrongPassword(password)) {
-      return res.status(400).json({
-        message: 'Password must have at least 8 characters, 1 uppercase letter, 1 number and 1 special character'
-      });
-    }
-
-    if (password !== confirmPassword) {
-      return res.status(400).json({ message: 'Password confirmation does not match' });
-    }
-
-    const existingUser = await User.findOne({ username });
-    if (existingUser) {
-      return res.status(409).json({ message: 'Username already exists' });
-    }
-
-    const user = await User.create({
-      username,
-      displayName,
-      phone: String(req.body.phone || '').trim(),
-      email: String(req.body.email || '').trim().toLowerCase(),
-      passwordHash: hashPassword(password),
-      role: 'contractor'
-    });
-    await writeActivity(user, 'Tạo tài khoản', 'account', username);
-
-    return res.status(201).json({
-      token: signToken(user),
-      user: {
-        id: user._id,
-        username: user.username,
-        displayName: user.displayName,
-        role: user.role
-      }
-    });
-  })
-);
-
-app.get(
-  '/api/projects',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const query = {};
-    if (req.query.status && req.query.status !== 'all') {
-      query.status = req.query.status;
-    }
-
-    const projects = await Project.find(query).sort({ createdAt: -1 });
-    res.json(projects);
-  })
-);
-
-app.get(
-  '/api/constructions',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const query = req.user.role === 'admin' ? {} : { contractorId: req.user._id };
-    res.json(await Construction.find(query).sort({ createdAt: -1 }));
-  })
-);
+app.use('/api/auth', createAuthRouter({ User, connectDatabase, hashPassword, isStrongPassword, rolePermissions, signToken, verifyPassword, writeActivity }));
+app.use('/api/constructions', createConstructionRouter({ Construction, requireAuth, writeActivity }));
+app.use('/api/materials', createMaterialRouter({ MaterialWorkspace, Workspace, Construction, requireAuth, writeActivity }));
+app.use('/api/costs', createCostRouter({ CostWorkspace, Workspace, Construction, requireAuth, writeActivity }));
+app.use('/api/progress', createProgressRouter({ ProgressTask, Construction, requireAuth, writeActivity }));
 
 app.get(
   '/api/workspace',
@@ -430,30 +257,10 @@ app.put(
   requireAuth,
   asyncHandler(async (req, res) => {
     if (req.user.role !== 'contractor') return res.status(403).json({ message: 'Workspace chỉ dành cho tài khoản thầu' });
-    const allowed = ['materialTransactions', 'purchaseRequests', 'expenses', 'diaries', 'constructionTeams', 'laborCosts', 'projectFiles'];
+    const allowed = ['diaries', 'constructionTeams', 'projectFiles'];
     const updates = Object.fromEntries(allowed.filter((key) => Array.isArray(req.body[key])).map((key) => [key, req.body[key]]));
     const workspace = await Workspace.findOneAndUpdate({ contractorId: req.user._id }, { $set: updates }, { new: true, upsert: true, runValidators: true });
     res.json(workspace);
-  })
-);
-
-app.post(
-  '/api/constructions',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    if (req.user.role !== 'contractor') return res.status(403).json({ message: 'Chỉ tài khoản thầu được tạo công trình' });
-    const existing = await Construction.findOne({ contractorId: req.user._id, name: String(req.body.name || '').trim() });
-    if (existing) return res.json(existing);
-    const count = await Construction.countDocuments();
-    const code = `CT${String(count + 1).padStart(3, '0')}`;
-    const construction = await Construction.create({
-      ...req.body,
-      code,
-      contractorId: req.user._id,
-      contractorName: req.user.displayName || req.user.username
-    });
-    await writeActivity(req.user, 'Tạo công trình', 'construction', construction.name, construction.code);
-    res.status(201).json(construction);
   })
 );
 
@@ -472,13 +279,22 @@ app.get(
   requireAuth,
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const [contractor, workspace, jobs] = await Promise.all([
+    const progressQuery = { contractorId: req.params.id };
+    if (req.query.constructionId) progressQuery.constructionId = req.query.constructionId;
+    const [contractor, workspace, materialWorkspace, costWorkspace, jobs] = await Promise.all([
       User.findById(req.params.id).select('-passwordHash'),
       Workspace.findOne({ contractorId: req.params.id }),
-      Project.find().sort({ createdAt: -1 })
+      MaterialWorkspace.findOne({ contractorId: req.params.id }),
+      CostWorkspace.findOne({ contractorId: req.params.id }),
+      ProgressTask.find(progressQuery).sort({ createdAt: -1 })
     ]);
     if (!contractor || contractor.role !== 'contractor') return res.status(404).json({ message: 'Không tìm thấy dữ liệu nhà thầu' });
-    res.json({ contractor, workspace: workspace || { materialTransactions: [], purchaseRequests: [], expenses: [], diaries: [], constructionTeams: [], laborCosts: [], projectFiles: [] }, jobs });
+    const workspaceData = workspace?.toObject() || { expenses: [], diaries: [], constructionTeams: [], laborCosts: [], projectFiles: [] };
+    workspaceData.materialTransactions = materialWorkspace?.materialTransactions || workspaceData.materialTransactions || [];
+    workspaceData.purchaseRequests = materialWorkspace?.purchaseRequests || workspaceData.purchaseRequests || [];
+    workspaceData.expenses = costWorkspace?.expenses || workspaceData.expenses || [];
+    workspaceData.laborCosts = costWorkspace?.laborCosts || workspaceData.laborCosts || [];
+    res.json({ contractor, workspace: workspaceData, jobs });
   })
 );
 
@@ -527,54 +343,6 @@ app.delete(
     if (!construction) return res.status(404).json({ message: 'Không tìm thấy công trình' });
     await writeActivity(req.user, 'Xóa công trình lỗi', 'construction', construction.name, construction.code);
     res.json({ message: 'Đã xóa công trình' });
-  })
-);
-
-app.post(
-  '/api/projects',
-  requireAuth,
-  requirePermission('create'),
-  asyncHandler(async (req, res) => {
-    const project = await Project.create(req.body);
-    await writeActivity(req.user, 'Tạo công việc', 'project', project.title, project.category);
-    res.status(201).json(project);
-  })
-);
-
-app.patch(
-  '/api/projects/:id',
-  requireAuth,
-  requirePermission('updateStatus'),
-  asyncHandler(async (req, res) => {
-    const project = await Project.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true
-    });
-
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    await writeActivity(req.user, 'Cập nhật trạng thái', 'project', project.title, project.status);
-
-    return res.json(project);
-  })
-);
-
-app.delete(
-  '/api/projects/:id',
-  requireAuth,
-  requirePermission('delete'),
-  asyncHandler(async (req, res) => {
-    const project = await Project.findByIdAndDelete(req.params.id);
-
-    if (!project) {
-      return res.status(404).json({ message: 'Project not found' });
-    }
-
-    await writeActivity(req.user, 'Xóa dữ liệu công việc', 'project', project.title);
-
-    return res.json({ message: 'Project deleted' });
   })
 );
 
@@ -686,7 +454,7 @@ app.get(
   asyncHandler(async (_req, res) => {
     const startedAt = Date.now();
     await mongoose.connection.db.admin().ping();
-    const [users, projects, constructions] = await Promise.all([User.countDocuments(), Project.countDocuments(), Construction.countDocuments()]);
+    const [users, projects, constructions] = await Promise.all([User.countDocuments(), ProgressTask.countDocuments(), Construction.countDocuments()]);
     res.json({ api: 'online', database: 'connected', responseTime: Date.now() - startedAt, users, projects, constructions, environment: process.env.VERCEL ? 'Vercel' : 'Local', checkedAt: new Date() });
   })
 );

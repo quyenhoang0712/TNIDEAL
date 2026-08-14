@@ -119,7 +119,7 @@ export default function AdminPage({ activeNavigation, activeNavigationId, logout
 
   async function openConstruction(construction) {
     setSelectedConstruction(construction); setConstructionTab('overview'); setConstructionData(null); setActionMenu(null);
-    try { setConstructionData(await adminRequest(`/api/admin/contractors/${construction.contractorId}/workspace`, session.token)); }
+    try { setConstructionData(await adminRequest(`/api/admin/contractors/${construction.contractorId}/workspace?constructionId=${construction._id}`, session.token)); }
     catch (error) { setNotice(error.message); }
   }
 
