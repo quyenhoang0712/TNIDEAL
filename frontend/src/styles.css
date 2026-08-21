@@ -2304,8 +2304,41 @@ textarea:disabled {
   margin: 5px 0 0;
 }
 
-.project-files-heading .primary-button {
+.project-files-heading p {
+  color: #71827c;
+  font-size: 0.78rem;
+  margin: 6px 0 0;
+}
+
+.project-files-upload {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
+.project-files-upload select {
+  border: 1px solid var(--soft-border);
+  border-radius: 11px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.project-files-heading .primary-button,
+.project-files-upload .primary-button {
+  min-width: 138px;
+  white-space: nowrap;
   width: auto;
+}
+
+.project-file-notice {
+  background: #e8f6ef;
+  border: 1px solid #cde7db;
+  border-radius: 11px;
+  color: #216750;
+  font-size: 0.82rem;
+  font-weight: 750;
+  margin: 0;
+  padding: 11px 13px;
 }
 
 .file-group {
@@ -2316,9 +2349,17 @@ textarea:disabled {
 }
 
 .file-group h4 {
+  align-items: center;
   background: #f4f8f6;
+  display: flex;
+  justify-content: space-between;
   margin: 0;
   padding: 12px 16px;
+}
+
+.file-group h4 span {
+  color: #83958e;
+  font-size: 0.7rem;
 }
 
 .file-row {
@@ -2340,15 +2381,42 @@ textarea:disabled {
   font-weight: 850;
 }
 
+.file-row-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.file-row-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-name small {
+  color: #82938d;
+  font-size: 0.7rem;
+}
+
 .file-row button {
+  align-items: center;
   background: transparent;
   border: 0;
   color: #1d7f65;
+  display: inline-flex;
   font-weight: 800;
+  gap: 5px;
 }
 
 .file-row button.delete-file {
   color: #a33b26;
+}
+
+.file-group-empty {
+  color: #83938d;
+  font-size: 0.8rem;
+  margin: 0;
+  padding: 17px 16px;
 }
 
 .overview-card:hover,
@@ -2873,16 +2941,50 @@ dd {
   }
 
   .project-files-heading .primary-button {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .project-files-upload {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .project-files-upload select {
     width: 100%;
   }
 
   .file-row {
-    grid-template-columns: 22px 1fr 34px;
+    grid-template-columns: 22px auto auto 36px;
   }
 
-  .file-row > span,
-  .file-row > button:not(.delete-file) {
+  .file-row > svg {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .file-row-name {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .file-row > span {
     display: none;
+  }
+
+  .file-row > button:nth-of-type(1) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .file-row > button:nth-of-type(2) {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .file-row > button:nth-of-type(3) {
+    grid-column: 4;
+    grid-row: 2;
   }
 
   .auth-shell {

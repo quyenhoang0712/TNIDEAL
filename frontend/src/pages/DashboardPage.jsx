@@ -4,6 +4,8 @@ import {
   ChevronRight,
   CirclePlus,
   ClipboardList,
+  Download,
+  Eye,
   FileText,
   LogOut,
   MapPin,
@@ -11,6 +13,7 @@ import {
   Ruler,
   Search,
   Trash2,
+  Upload,
   UserRound,
   UserCheck,
   UsersRound,
@@ -22,6 +25,53 @@ import MaterialManagement from './MaterialManagement';
 import ProjectCostPage from './ProjectCostPage';
 import ConstructionProgressUpdate from '../components/progress/ConstructionProgressUpdate';
 import { DEFAULT_MATERIAL_DEFINITIONS, getMaterialData, saveMaterialData } from '../services/materialApi';
+
+const PROJECT_FILE_GROUPS = ['Bản vẽ', 'Hợp đồng', 'Pháp lý / tài liệu khác'];
+const MAX_PDF_FILE_SIZE = 2 * 1024 * 1024;
+const MAX_PDF_TOTAL_SIZE = 6 * 1024 * 1024;
+
+function createEmptyProjectFiles() {
+  return PROJECT_FILE_GROUPS.map((group) => ({ group, files: [] }));
+}
+
+function normalizeProjectFiles(groups) {
+  return PROJECT_FILE_GROUPS.map((group) => {
+    const savedGroup = Array.isArray(groups) ? groups.find((item) => item?.group === group) : null;
+    const files = Array.isArray(savedGroup?.files)
+      ? savedGroup.files
+        .filter((file) => file && typeof file === 'object' && file.url)
+        .map((file, index) => ({
+          ...file,
+          id: file.id || `pdf-${Date.now()}-${index}`,
+          uploadedAt: file.uploadedAt || new Date().toISOString()
+        }))
+      : [];
+    return { group, files };
+  });
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 KB';
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.ceil(bytes / 1024)} KB`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Không đọc được file ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function createPdfObjectUrl(dataUrl) {
+  const [, base64 = ''] = String(dataUrl).split(',');
+  const binary = window.atob(base64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+}
 
 async function workspaceRequest(token, options = {}) {
   const response = await fetch('/api/workspace', { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } });
@@ -105,12 +155,11 @@ export default function DashboardPage({
     const matchesSearch = !query || [team.name, team.leader, team.project, team.category].some((value) => value.toLocaleLowerCase('vi').includes(query));
     return matchesSearch && (workerStatus === 'all' || team.status === workerStatus);
   });
-  const [projectFiles, setProjectFiles] = useState([
-    { group: 'Bản vẽ', files: ['Bản vẽ kiến trúc.pdf', 'Bản vẽ kết cấu.pdf'] },
-    { group: 'Hợp đồng', files: ['Hợp đồng thi công.pdf'] },
-    { group: 'Pháp lý / tài liệu khác', files: ['Giấy phép xây dựng.pdf'] }
-  ]);
-  const initialWorkspace = useRef({ diaries, constructionTeams, projectFiles });
+  const [projectFiles, setProjectFiles] = useState(createEmptyProjectFiles);
+  const [projectFileGroup, setProjectFileGroup] = useState(PROJECT_FILE_GROUPS[0]);
+  const [projectFileNotice, setProjectFileNotice] = useState('');
+  const projectFileInputRef = useRef(null);
+  const initialWorkspace = useRef({ diaries, constructionTeams, projectFiles: createEmptyProjectFiles() });
 
   useEffect(() => {
     if (session.user.role !== 'contractor') return;
@@ -120,7 +169,7 @@ export default function DashboardPage({
       if (data._id) {
         setDiaries(data.diaries || []);
         setConstructionTeams(data.constructionTeams?.length ? data.constructionTeams : initialWorkspace.current.constructionTeams);
-        setProjectFiles(data.projectFiles?.length ? data.projectFiles : initialWorkspace.current.projectFiles);
+        setProjectFiles(normalizeProjectFiles(data.projectFiles));
       } else {
         await workspaceRequest(session.token, { method: 'PUT', body: JSON.stringify(initialWorkspace.current) });
       }
@@ -157,6 +206,90 @@ export default function DashboardPage({
     }, 350);
     return () => window.clearTimeout(timeout);
   }, [materialDefinitions, materialTransactions, materialsReady, purchaseRequests, session.token, session.user.role]);
+
+  async function uploadProjectFiles(event) {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = '';
+    setProjectFileNotice('');
+    if (!selectedFiles.length) return;
+
+    const invalidType = selectedFiles.find((file) => file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf'));
+    if (invalidType) {
+      setProjectFileNotice('Chỉ chấp nhận file PDF.');
+      return;
+    }
+
+    const oversized = selectedFiles.find((file) => file.size > MAX_PDF_FILE_SIZE);
+    if (oversized) {
+      setProjectFileNotice(`${oversized.name} vượt quá giới hạn 2 MB.`);
+      return;
+    }
+
+    const currentSize = projectFiles.flatMap((group) => group.files).reduce((total, file) => total + Number(file.size || 0), 0);
+    const selectedSize = selectedFiles.reduce((total, file) => total + file.size, 0);
+    if (currentSize + selectedSize > MAX_PDF_TOTAL_SIZE) {
+      setProjectFileNotice('Tổng dung lượng hồ sơ không được vượt quá 6 MB.');
+      return;
+    }
+
+    try {
+      const uploadedFiles = await Promise.all(selectedFiles.map(async (file) => {
+        const dataUrl = await readFileAsDataUrl(file);
+        return {
+          id: window.crypto.randomUUID?.() || `pdf-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: file.name,
+          type: 'application/pdf',
+          size: file.size,
+          url: String(dataUrl).replace(/^data:[^;]*;base64,/, 'data:application/pdf;base64,'),
+          uploadedAt: new Date().toISOString()
+        };
+      }));
+
+      setProjectFiles((current) => current.map((group) => (
+        group.group === projectFileGroup
+          ? { ...group, files: [...group.files, ...uploadedFiles] }
+          : group
+      )));
+      setProjectFileNotice(`Đã thêm ${uploadedFiles.length} file PDF. Hệ thống đang đồng bộ lên MongoDB.`);
+    } catch (error) {
+      setProjectFileNotice(error.message);
+    }
+  }
+
+  function openProjectFile(file) {
+    try {
+      const objectUrl = createPdfObjectUrl(file.url);
+      window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      setProjectFileNotice('Không thể mở file PDF này.');
+    }
+  }
+
+  function downloadProjectFile(file) {
+    try {
+      const objectUrl = createPdfObjectUrl(file.url);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = file.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+    } catch {
+      setProjectFileNotice('Không thể tải file PDF này.');
+    }
+  }
+
+  function deleteProjectFile(groupName, file) {
+    if (!window.confirm(`Xóa file ${file.name}?`)) return;
+    setProjectFiles((current) => current.map((group) => (
+      group.group === groupName
+        ? { ...group, files: group.files.filter((item) => item.id !== file.id) }
+        : group
+    )));
+    setProjectFileNotice(`Đã xóa ${file.name}.`);
+  }
 
   return (
     <main className="app-shell">
@@ -323,7 +456,55 @@ export default function DashboardPage({
                 <div className="project-detail-content">
                   {projectDetailTab === 'overview' && <div className="detail-overview"><div className="detail-overview-grid"><article><MapPin /><span>Địa chỉ công trình</span><strong>{completedProjectSetup.fullAddress || completedProjectSetup.location}</strong></article><article><UserRound /><span>Chủ đầu tư</span><strong>{completedProjectSetup.investorName}</strong><small>{completedProjectSetup.investorPhone}</small></article><article><Ruler /><span>Quy mô</span><strong>{completedProjectSetup.landLength}m × {completedProjectSetup.landWidth}m</strong><small>Trệt, {completedProjectSetup.upperFloors || 0} lầu · {completedProjectSetup.hasBasement ? 'Có hầm' : 'Không hầm'}</small></article><article><CalendarDays /><span>Thời gian</span><strong>{completedProjectSetup.startDate}</strong><small>Dự kiến {completedProjectSetup.duration} tháng</small></article></div><div className="detail-project-status"><div><span>Tình trạng dự án</span><strong className={`status-text ${constructionStatusClass}`}>{constructionStatus}</strong></div><div><span>Tiến độ</span><strong>{overallProgress}%</strong></div><div><span>Hạng mục</span><strong>{completedJobs}/7 hoàn thành</strong></div><span className="project-progress-track"><span style={{ width: `${overallProgress}%` }} /></span><button className="ghost-button" type="button"><Pencil size={17} />Chỉnh sửa thông tin dự án</button></div></div>}
                   {projectDetailTab === 'categories' && <div className="category-panel"><div className="category-panel-heading"><div><span className="eyebrow">Hạng mục thi công phần thô</span><h3>{completedJobs}/7 hạng mục hoàn thành</h3></div><button className="primary-button" type="button" onClick={() => { setShowProjectDetail(false); setShowJobs(true); }}><CirclePlus size={18} />Thêm hạng mục</button></div><div className="category-table"><div className="category-table-head"><span>Hạng mục</span><span>Trạng thái</span><span>Tiến độ</span><span /></div>{roughCategories.map((category, index) => <div className="category-table-group" key={category}><button className="category-table-row" type="button" onClick={() => setExpandedCategory(expandedCategory === index ? null : index)}><strong><span>{String(index + 1).padStart(2, '0')}.</span>{category}</strong><span className={`category-state ${index < completedJobs ? 'done' : index === completedJobs && projects.length ? 'active' : ''}`}>{index < completedJobs ? 'Hoàn thành' : index === completedJobs && projects.length ? 'Đang thực hiện' : 'Chưa bắt đầu'}</span><b>{index < completedJobs ? '100%' : '0%'}</b><ChevronRight className={expandedCategory === index ? 'expanded' : ''} size={18} /></button>{expandedCategory === index && <div className="category-tasks"><div className="category-task-title"><strong>{category} — {index < completedJobs ? '100%' : '0%'}</strong><button type="button" onClick={() => { setShowProjectDetail(false); setShowJobs(true); }}><CirclePlus size={16} />Thêm công việc</button></div>{(index === 1 ? foundationTasks : ['Chưa có công việc. Bấm “Thêm công việc” để tạo.']).map((task) => <label key={task}><input type="checkbox" disabled={!index || index >= completedJobs} defaultChecked={index < completedJobs} /><span>{task}</span></label>)}</div>}</div>)}</div></div>}
-                  {projectDetailTab === 'files' && <div className="project-files"><div className="project-files-heading"><div><span className="eyebrow">Hồ sơ dự án</span><h3>Tài liệu công trình</h3></div><button className="primary-button" type="button"><CirclePlus size={18} />Tải hồ sơ lên</button></div>{[['Bản vẽ', ['Bản vẽ kiến trúc.pdf', 'Bản vẽ kết cấu.pdf']], ['Hợp đồng', ['Hợp đồng thi công.pdf']], ['Pháp lý / tài liệu khác', ['Giấy phép xây dựng.pdf']]].map(([group, files]) => <section className="file-group" key={group}><h4>{group}</h4>{files.map((file) => <div className="file-row" key={file}><FileText size={20} /><strong>{file}</strong><span>PDF</span><button type="button">Xem</button><button type="button">Tải xuống</button><button className="delete-file" type="button" aria-label={`Xóa ${file}`}><Trash2 size={17} /></button></div>)}</section>)}</div>}
+                  {projectDetailTab === 'files' && (
+                    <div className="project-files">
+                      <div className="project-files-heading">
+                        <div>
+                          <span className="eyebrow">Hồ sơ dự án</span>
+                          <h3>Tài liệu công trình</h3>
+                          <p>Chỉ nhận PDF, tối đa 2 MB/file và 6 MB cho toàn bộ hồ sơ.</p>
+                        </div>
+                        <div className="project-files-upload">
+                          <select aria-label="Nhóm hồ sơ" value={projectFileGroup} onChange={(event) => setProjectFileGroup(event.target.value)}>
+                            {PROJECT_FILE_GROUPS.map((group) => <option key={group}>{group}</option>)}
+                          </select>
+                          <button className="primary-button" type="button" onClick={() => projectFileInputRef.current?.click()}>
+                            <Upload size={18} />Tải PDF lên
+                          </button>
+                          <input
+                            accept="application/pdf,.pdf"
+                            hidden
+                            multiple
+                            ref={projectFileInputRef}
+                            type="file"
+                            onChange={uploadProjectFiles}
+                          />
+                        </div>
+                      </div>
+
+                      {projectFileNotice && <p className="project-file-notice">{projectFileNotice}</p>}
+
+                      {projectFiles.map(({ group, files }) => (
+                        <section className="file-group" key={group}>
+                          <h4>{group}<span>{files.length} file</span></h4>
+                          {files.map((file) => (
+                            <div className="file-row" key={file.id}>
+                              <FileText size={20} />
+                              <div className="file-row-name">
+                                <strong>{file.name}</strong>
+                                <small>{formatFileSize(file.size)} · {new Date(file.uploadedAt).toLocaleDateString('vi-VN')}</small>
+                              </div>
+                              <span>PDF</span>
+                              <button type="button" onClick={() => openProjectFile(file)}><Eye size={16} />Xem</button>
+                              <button type="button" onClick={() => downloadProjectFile(file)}><Download size={16} />Tải xuống</button>
+                              <button className="delete-file" type="button" aria-label={`Xóa ${file.name}`} onClick={() => deleteProjectFile(group, file)}><Trash2 size={17} /></button>
+                            </div>
+                          ))}
+                          {files.length === 0 && <p className="file-group-empty">Chưa có file PDF trong nhóm này.</p>}
+                        </section>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
